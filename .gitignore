@@ -1,0 +1,18 @@
+﻿# Release artifacts are attached to GitHub Releases, never committed.
+dist/
+bin/
+*.nupkg
+*.zip
+*.tar.gz
+hexaeight-agent
+hexaeight-agent.exe
+
+# Identity and licence material must never reach a repository.
+env-file
+hexaeight.mac
+*.he
+.probe.state
+
+# Build output
+obj/
+[Bb]in/
