@@ -127,9 +127,24 @@ your own agent.
 
 ## Platform coverage
 
-`osx-arm64` covers Apple Silicon. Intel Macs need a separate build: the platform validates an IL
-hash computed per *(assembly, runtime, OS)*, and cross-publishing cannot produce it — the capture
-has to happen on that architecture.
+| platform | status |
+|---|---|
+| Windows x64 | published |
+| Linux x64 | published |
+| macOS Apple Silicon (arm64) | published |
+| **macOS Intel (x64)** | **not published — [contact support](mailto:support@hexaeight.com)** |
+| Linux arm64 | not published — [contact support](mailto:support@hexaeight.com) |
+
+**On an Intel Mac**, email <support@hexaeight.com> and we will build one for you. `install-agent`
+detects the platform and exits with a message rather than installing a near-match, because a build
+for one architecture cannot stand in for another.
+
+This is not an oversight or a packaging shortcut. The platform validates an integrity hash computed
+per *(assembly, runtime, OS)*, and that hash can only be produced by running on the target
+architecture — cross-publishing cannot generate it. So an Intel build needs a capture on an Intel
+Mac before it can be trusted, which is a step we perform rather than something you can work around
+locally. Running the arm64 build under Rosetta will not work either: the attested hash is that of a
+different build.
 
 ## Licence
 
