@@ -111,6 +111,38 @@ row came from a different runtime/OS than the caller.
 
 ---
 
+## Platform coverage — what is published, and what is not
+
+| RID | status |
+|---|---|
+| `win-x64` | published |
+| `linux-x64` | published |
+| `osx-arm64` | published |
+| `osx-x64` (Intel Mac) | **NOT published** — no Intel Mac available to capture on |
+| `linux-arm64` | **NOT published** — no arm64 Linux box available to capture on |
+
+Both gaps are for the same reason, and neither can be closed from a machine we already have: the
+integrity hash is computed per *(assembly, runtime, OS)*, so it can only be produced by building and
+running **on the target architecture**. Cross-publishing does not generate it, and emulation attests
+a different build. `install-agent` therefore exits **2** on those platforms and points the user at
+support@hexaeight.com rather than installing a near-match that the platform would refuse anyway.
+
+### To close `linux-arm64`
+
+Any aarch64 Linux machine will do — a Raspberry Pi 4/5 on a **64-bit** OS (`uname -m` must report
+`aarch64`; 32-bit Raspberry Pi OS yields `linux-arm`, a different RID and useless here), a cloud
+arm64 VM (Oracle Ampere, AWS Graviton, Hetzner CAX), or an arm64 Linux container on Apple Silicon,
+which runs natively rather than emulated.
+
+Then follow steps 2–5 for that RID. Note before spending a licence: on macOS the harness printed all
+of its rows **while the licence call was failing**, because it computes them locally — so a capture
+may not need a fully working identity, only a machine that can run the binary. Worth confirming on
+the first arm64 box rather than assuming either way.
+
+Checked and ruled out: the `54.227.x.x` licence server is **x86_64**, not arm64.
+
+---
+
 ## Step 3 — Build the agent, all platforms
 
 ```powershell
@@ -243,3 +275,60 @@ A **404** or a JSON parse error in the log is not a refusal. 404 means the route
 
 That last one deserves emphasis: a probe built against `<ProjectReference>` measures nothing, because
 every decrypt returns an empty string with no exception. Always reference the published package.
+
+---
+
+## Open work
+
+Tracked here because it is release-shaped: each item ends in something published.
+
+### 1. `linux-arm64` — blocked on hardware
+
+See *Platform coverage* above. Needs an aarch64 Linux box; everything else is written down.
+
+### 2. Intel Mac (`osx-x64`) — blocked on hardware
+
+Same shape. Until then, `install-agent` exits 2 and directs the user to support.
+
+### 3. Working examples
+
+The agent is proven at the protocol level — an unapproved build is refused, an approved one is
+admitted, hot reload works without a restart. What does not yet exist is a customer walking from
+"licence purchased" to "my agent answered a question", without reading this file.
+
+Needed:
+
+- A minimal caller in each supported language, doing the DDE handshake against `/external/incoming`.
+  The C# sample under `samples/external-caller` is the reference; it is currently a test fixture and
+  reads like one.
+- A worked agent-to-agent example: two identities, one authorising the other, showing where the
+  approved-build gate sits in that flow.
+- An engine configuration that a reader can copy — the config on the WSL box has thirty engines and
+  is a poor first example.
+
+### 4. Website deployment documentation
+
+The gap a paying customer hits first. From a purchased licence to a running agent:
+
+1. `cpucores` — a licence must cover this machine's cores, and this is checked **before** buying
+2. `dotnet tool install --global HexaEight.Activate`
+3. `install-agent` — download and verify
+4. `newtoken` — interactive: licence code plus QR approval in the Authenticator app
+5. `--init-policy` — locks the agent down and gates it on the running build's origin
+6. Configure engines and start
+7. `approve-builds --tighten` when the agent should accept only known builds
+
+Points that must be in the docs because they cost time when missed:
+
+- **Every command runs in the identity folder.** "No identity in this folder" is the most common
+  first failure and does not read like a working-directory problem.
+- **`hexaeight.mac` is machine-bound and must never be copied.** Hardlink it to share one licence
+  between programs on the same machine.
+- **One identity per machine.** Provisioning scripts that clone a VM image with an identity in it
+  will not work.
+- **What cannot be automated:** `newtoken`, `renewtoken`, `--init-policy`. Anyone scripting a
+  deployment needs to know where the human step falls.
+- **Verification is a step, not a footnote:** `--probe` for platform trust, `verify-libs` for the
+  libraries, and the fact that `verify-libs` finding nothing is itself a red flag.
+- **Keeping current:** `verify-env` on a schedule refreshes the approved-build list, so a peer that
+  upgrades is not refused. Without it the failure looks like an intermittent network fault.
