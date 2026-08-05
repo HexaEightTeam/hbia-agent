@@ -9,9 +9,30 @@ agent decides whether to answer.
 Each build is **self-contained** — it carries its own .NET runtime, so nothing needs to be installed
 to run it.
 
-## Download
+## Install
 
-Take the file for your platform from the [latest release](../../releases/latest).
+Use the tool. It picks the right binary for your platform, downloads it, and **verifies it before it
+can run**:
+
+```bash
+dotnet tool install --global HexaEight.Activate
+mkdir my-agent && cd my-agent
+hexaeight-activate install-agent
+```
+
+The expected SHA-256 ships *inside* that package, so it does not come from the same place as the
+download. A checksum published next to the file it describes proves only that the two were produced
+together — whoever can replace one can replace the other. Because the hash arrives via nuget.org
+(TLS, a reserved `HexaEight.` prefix nobody else can publish beneath, and your own decision to
+install the tool), GitHub only has to serve bytes. A substituted file fails the comparison and is
+**deleted before it is ever marked executable**.
+
+Re-running is safe: an already-verified install reports that and exits without downloading again.
+
+### Or download by hand
+
+Take the file for your platform from the [latest release](../../releases/latest) and check it
+against `HASHES.md`:
 
 | platform | file |
 |---|---|
@@ -19,30 +40,25 @@ Take the file for your platform from the [latest release](../../releases/latest)
 | Linux x64 | `hexaeight-agent-linux-x64` |
 | macOS Apple Silicon | `hexaeight-agent-osx-arm64` |
 
+```bash
+sha256sum hexaeight-agent-linux-x64                      # Linux
+shasum -a 256 hexaeight-agent-osx-arm64                  # macOS
+certutil -hashfile hexaeight-agent-win-x64.exe SHA256    # Windows
+
+chmod +x hexaeight-agent-linux-x64                       # Linux / macOS
+xattr -d com.apple.quarantine hexaeight-agent-osx-arm64  # macOS, if Gatekeeper objects
+```
+
 Intel Macs are not covered — see *Platform coverage* below.
 
-```bash
-chmod +x hexaeight-agent-linux-x64      # Linux / macOS
-xattr -d com.apple.quarantine hexaeight-agent-osx-arm64   # macOS, if Gatekeeper objects
-```
+## Verify what you have
 
-## Verify what you downloaded
+Two further checks, answering different questions. Order matters.
 
-Three checks, answering three different questions. Do them in this order.
-
-**1. Did the file arrive intact?** Compare against `HASHES.md` in the release.
-
-```bash
-sha256sum hexaeight-agent-linux-x64        # Linux
-shasum -a 256 hexaeight-agent-osx-arm64    # macOS
-certutil -hashfile hexaeight-agent-win-x64.exe SHA256   # Windows
-```
-
-**2. Are the libraries inside the ones we published?**
+**Are the libraries inside the ones we published?**
 
 ```bash
 ./hexaeight-agent --probe        # run once so the assemblies land on disk
-dotnet tool install -g HexaEight.Activate
 hexaeight-activate verify-libs   # compares each assembly against nuget.org
 ```
 
@@ -50,7 +66,7 @@ hexaeight-activate verify-libs   # compares each assembly against nuget.org
 disk precisely so they can be checked; a build with nothing to check was not packaged the way we
 publish, and you should treat it as suspect rather than convenient.
 
-**3. Does the platform trust this build?**
+**Does the platform trust this build?**
 
 ```bash
 ./hexaeight-agent --probe ; echo $?     # 0 = blessed, 2 = not
@@ -89,12 +105,20 @@ A running agent watches its allowlist, so approving a build takes effect **witho
 ## Getting started
 
 ```bash
-dotnet tool install -g HexaEight.Activate
+dotnet tool install --global HexaEight.Activate
 mkdir my-agent && cd my-agent
-hexaeight-activate newtoken     # interactive: needs a licence code + Authenticator approval
-./hexaeight-agent --init-policy # locks the agent down, and gates it on this build's origin
+
+hexaeight-activate install-agent   # download + verify the binary for this platform
+hexaeight-activate newtoken        # interactive: licence code + Authenticator approval
+./hexaeight-agent --init-policy    # locks the agent down, and gates it on this build's origin
 ./hexaeight-agent
 ```
+
+Every command runs in the **current working directory**, which must be the folder holding `env-file`
+and `hexaeight.mac`. Running from anywhere else fails with "no identity in this folder".
+
+`newtoken` and `--init-policy` need a person — a QR approval in the Authenticator app, and an owner
+email. Everything else here runs unattended.
 
 `--init-policy` writes a closed policy — nobody but the owner — and closes the build gate around the
 binary that is running, measured rather than guessed. If it cannot measure the hash it leaves the
