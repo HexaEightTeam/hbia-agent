@@ -268,8 +268,39 @@ Three things that must hold, or it will fail in ways that look unrelated:
 - **The agent still needs to be publicly reachable and registered** — see step 6b. Hosting the UI
   statically removes the workspace's tunnel, not the agent's.
 
-Serve the files however that host serves anything; there is no build step and nothing
-machine-specific in them. Upgrading later means copying a newer bundle and keeping `config.js`.
+**It can be any host, and you should help them set it up rather than hand them files.** Ask what
+they already have, then do the work with them. There is no build step and nothing machine-specific
+in the bundle, so it is genuinely just files plus a correct `config.js`. Some starting points:
+
+```bash
+# nginx / Apache on this machine or another
+sudo cp -r ~/.heia/runtime/workspace/* /var/www/hbia/
+# then a server block for /var/www/hbia with TLS (certbot, or a certificate they already have)
+
+# S3 + CloudFront
+aws s3 sync ~/.heia/runtime/workspace/ s3://their-bucket/ --delete
+# CloudFront in front of it gives HTTPS; set index.html as the default root object
+
+# Netlify / Vercel / Cloudflare Pages
+netlify deploy --dir ~/.heia/runtime/workspace --prod      # HTTPS included
+
+# GitHub Pages
+# commit the directory to a repo, enable Pages on that branch — HTTPS included
+```
+
+Whatever they choose, do these three things with them and check each one:
+
+1. **Copy the whole directory**, not selected files — `bootsharp/` is ~56 MB of WASM and sign-in
+   fails without it. Confirm `bootsharp/dotnet/dotnet.js` is reachable on the deployed site.
+2. **Edit `config.js` on the host** with their agent name and `localWorkspace: false`. Fetch it back
+   and read it to confirm it deployed — a cached old copy is a common and confusing failure.
+3. **Load the site and check the browser console.** `reading 'sign' of undefined` means it is not
+   being served over HTTPS.
+
+If they have no host and no preference, the tunnel in step 6b is the quickest thing that works;
+offer that instead of leaving them stuck.
+
+Upgrading later means copying a newer bundle and keeping their `config.js`.
 
 ---
 
