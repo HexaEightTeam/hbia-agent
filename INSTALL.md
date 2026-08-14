@@ -432,17 +432,29 @@ Upgrading later means copying a newer bundle and keeping their `config.js`.
 Several steps need a restart. Do it this way; the obvious way has three traps and you will hit all
 of them.
 
-```bash
-# 1. Find them. NEVER `pkill -f hexaeight-agent-linux-x64` — that pattern matches YOUR OWN shell
-#    command, so pkill kills the shell running it. You will see exit code 144 and lose the session.
-pgrep -af 'hexaeight-agent-linux-x64' | grep -v pgrep
+**MATCH ON THE EXECUTABLE, NEVER ON THE COMMAND LINE.** Any `-f` pattern containing the binary's
+name also matches *your own shell*, because your command line contains that string too. `pkill -f`
+then kills your session (exit 144), and a `pgrep -f` kill-loop does the same thing one step later.
+Both have happened here.
 
-# 2. Kill by PID, then CONFIRM. pkill has repeatedly failed to stop this process while reporting
-#    success; a survivor holds port 8770, and the replacement then aborts at startup with
-#    "address already in use" — which reads as a broken install rather than a stale process.
-for p in $(pgrep -f 'hexaeight-agent-linux-x64'); do kill -9 "$p" 2>/dev/null; done
+The reliable test is what a process actually *is*: `/proc/<pid>/exe`.
+
+```bash
+# 1. Find real agent processes — those whose executable IS the agent binary.
+AGENT="$HOME/hbia-agent/hexaeight-agent-linux-x64"
+agent_pids() {
+  for p in $(pgrep -f 'hexaeight-agent' 2>/dev/null); do
+    [ "$(readlink -f "/proc/$p/exe" 2>/dev/null)" = "$AGENT" ] && echo "$p"
+  done
+}
+agent_pids
+
+# 2. Kill those, and CONFIRM. pkill has repeatedly reported success while the process survived;
+#    a survivor holds port 8770 and the replacement aborts with "address already in use", which
+#    reads as a broken install rather than a stale process.
+for p in $(agent_pids); do kill -9 "$p" 2>/dev/null; done
 sleep 3
-pgrep -cf 'hexaeight-agent-linux-x64'      # must print 0
+[ -z "$(agent_pids)" ] && echo "all stopped" || { echo "STILL RUNNING:"; agent_pids; }
 ss -ltn | grep -E ':8770|:8899' || echo "ports clear"
 
 # 3. TRUNCATE THE LOG. agent.log is appended across boots, so lines from the previous run sit above
@@ -460,8 +472,13 @@ sleep 40
 Then verify it is **the new process** — not the old one you meant to replace:
 
 ```bash
-ps -o pid,lstart,cmd -p "$(pgrep -f 'hexaeight-agent-linux-x64' | head -1)"
+ps -o pid,lstart,cmd -p "$(agent_pids | head -1)"
 ```
+
+The same `/proc/<pid>/exe` rule applies to the router
+(`~/hbia-router/hexaeight-router-linux-x64`). For the workspace, `pkill -f 'serve.mjs --port'` is
+safe **only** if your own command line does not contain that string — check with
+`pgrep -af 'serve.mjs --port'` first and kill by PID if it lists your shell.
 
 The start time must be seconds ago. The same procedure applies to the router
 (`hexaeight-router-linux-x64`) and the workspace (`serve.mjs --port`).
