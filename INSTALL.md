@@ -427,6 +427,52 @@ Upgrading later means copying a newer bundle and keeping their `config.js`.
 
 ---
 
+## Restarting a component — read this before you do it
+
+Several steps need a restart. Do it this way; the obvious way has three traps and you will hit all
+of them.
+
+```bash
+# 1. Find them. NEVER `pkill -f hexaeight-agent-linux-x64` — that pattern matches YOUR OWN shell
+#    command, so pkill kills the shell running it. You will see exit code 144 and lose the session.
+pgrep -af 'hexaeight-agent-linux-x64' | grep -v pgrep
+
+# 2. Kill by PID, then CONFIRM. pkill has repeatedly failed to stop this process while reporting
+#    success; a survivor holds port 8770, and the replacement then aborts at startup with
+#    "address already in use" — which reads as a broken install rather than a stale process.
+for p in $(pgrep -f 'hexaeight-agent-linux-x64'); do kill -9 "$p" 2>/dev/null; done
+sleep 3
+pgrep -cf 'hexaeight-agent-linux-x64'      # must print 0
+ss -ltn | grep -E ':8770|:8899' || echo "ports clear"
+
+# 3. TRUNCATE THE LOG. agent.log is appended across boots, so lines from the previous run sit above
+#    the new ones and read as current. An installer spent four steps deciding whether
+#    "[register] disabled" was from this boot or the last one. Truncating makes the log say only
+#    what just happened.
+cd ~/hbia-agent && : > agent.log
+
+# 4. Start detached, so it survives your shell ending.
+setsid ./hexaeight-agent-linux-x64 > agent.log 2>&1 < /dev/null &
+disown
+sleep 40
+```
+
+Then verify it is **the new process** — not the old one you meant to replace:
+
+```bash
+ps -o pid,lstart,cmd -p "$(pgrep -f 'hexaeight-agent-linux-x64' | head -1)"
+```
+
+The start time must be seconds ago. The same procedure applies to the router
+(`hexaeight-router-linux-x64`) and the workspace (`serve.mjs --port`).
+
+**A config change needs a restart to take effect.** Editing `hexaeight-agent.json` or re-sealing an
+engine changes nothing in a running agent — engines are read at startup, and "engines load live"
+adds new ones without rebuilding an existing one. If a change appears to have been ignored, it was:
+the agent is still running the previous definition.
+
+---
+
 ## 6b. Remote access — only if the human wants it
 
 **Skip this entirely if the browser is on this machine.** `http://localhost:5620` is a secure
