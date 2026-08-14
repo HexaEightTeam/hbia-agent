@@ -207,6 +207,50 @@ Ask plainly: *"Your key can reach these models — which should the agent use?"*
 exactly as printed; that string is the provider's model id and you need it verbatim in step 5. Do
 not choose one yourself, and do not shorten it.
 
+**THE LIST IS THE ONLY EVIDENCE. Do not reason about who made a model.** One provider hosts many
+vendors' models: a Bedrock key typically reaches `anthropic.claude-*`, `zai.glm-*`,
+`moonshotai.kimi-*`, `openai.gpt-oss-*`, `qwen.*` and `deepseek.*` all at once. So "GLM is a z.ai
+model, therefore it is not on this Bedrock route" is **wrong reasoning** — if `zai.glm-5` appears in
+the output, that route serves it. If it does not appear, it is not reachable, whoever made it.
+
+### If they want a model this key cannot reach
+
+That is not a failure and not something to talk them out of. It means a **second provider**, which
+is one more run of the same command:
+
+```bash
+hexaeight-activate upstreams
+```
+
+Pick that provider, give it its **own tag** (the tag names one provider *and* one key), and ask the
+human for **that provider's key** — a Bedrock key does not work at z.ai. Then re-check with
+`hexaeight-activate models --tag <newtag>` and use one of *its* routes in step 5.
+
+Both providers coexist; nothing is replaced. An agent can have engines on different providers, and
+a route name is what selects between them.
+
+### The split decision — why a route name is not a model name
+
+The engine sends **one** string that does two jobs, separated by `|`:
+
+```
+claude-ant-aws|us.anthropic.claude-sonnet-4-20250514-v1:0
+└── route ──┘ └────────────── model ──────────────────┘
+```
+
+- **The left half chooses the upstream.** The router globs it against each entry's `match` and
+  `shape`. That is how it knows *which provider and which key* to use — `…-aws` and `…-zai` are
+  different destinations even for the same model family.
+- **The right half is what the provider is asked for**, sent verbatim. It must be a real model id
+  from the `models` output.
+
+This is why a route name never has to be a real model name, and why you cannot swap them. A common
+mistake is putting a model id on the left (it then matches no route → HTTP 503) or a route name on
+the right (the provider has never heard of it → 404 from the provider).
+
+To use a different model on the same provider later, only the right half changes. To use a different
+*provider*, the left half changes to one of that provider's routes.
+
 Start it:
 
 ```bash
