@@ -24,6 +24,31 @@ vendors at very different prices, and the choice is theirs. You need their answe
 
 ---
 
+## Platform notes — read the one that applies
+
+**macOS**
+
+- Binaries are `hexaeight-agent-osx-arm64` / `hexaeight-router-osx-arm64`. Wherever this guide
+  writes `hexaeight-agent-linux-x64`, use the `osx-arm64` name — or the glob `./hexaeight-agent-*`.
+- **Clear the quarantine flag** after a download, or the binary will not run:
+  ```bash
+  xattr -d com.apple.quarantine ./hexaeight-agent-osx-arm64 2>/dev/null; chmod +x ./hexaeight-agent-*
+  ```
+- **The sandbox is `sandbox-exec`, built into the OS.** `hexaeight-activate sandbox` should say
+  WORKING with nothing to install. There is no bubblewrap on macOS, and nothing to `sudo apt` —
+  if you find yourself installing a sandbox on a Mac, you are following the Linux path by mistake.
+- There is no `/proc`, so any recipe reading `/proc/<pid>/exe` is Linux-only. Use the port-based
+  procedure in this guide, which works on both.
+- `ss` does not exist; use `lsof -ti tcp:<port>` (present on every Mac).
+
+**Linux**
+
+- Binaries are `-linux-x64`. The sandbox is **bubblewrap**, a `sudo` install, and on Ubuntu 23.10+
+  it may install successfully and still be unable to run — see step 4, and check *before* starting
+  the agent.
+
+---
+
 ## 0. What you are building
 
 Three components, each in its own directory, all sharing one identity:
@@ -432,30 +457,38 @@ Upgrading later means copying a newer bundle and keeping their `config.js`.
 Several steps need a restart. Do it this way; the obvious way has three traps and you will hit all
 of them.
 
-**MATCH ON THE EXECUTABLE, NEVER ON THE COMMAND LINE.** Any `-f` pattern containing the binary's
-name also matches *your own shell*, because your command line contains that string too. `pkill -f`
-then kills your session (exit 144), and a `pgrep -f` kill-loop does the same thing one step later.
-Both have happened here.
+**NEVER MATCH ON THE COMMAND LINE.** Any `-f` pattern containing the binary's name also matches
+*your own shell*, because your command line contains that string too. `pkill -f` kills your session
+(exit 144) and leaves the agent running; a `pgrep -f` kill-loop does the same thing one step later.
+Both have happened here, in consecutive attempts.
 
-The reliable test is what a process actually *is*: `/proc/<pid>/exe`.
+**Target the PORTS instead.** A port is held by exactly one process, your shell holds none of them,
+and it works the same on Linux and macOS.
 
 ```bash
-# 1. Find real agent processes — those whose executable IS the agent binary.
-AGENT="$HOME/hbia-agent/hexaeight-agent-linux-x64"
-agent_pids() {
-  for p in $(pgrep -f 'hexaeight-agent' 2>/dev/null); do
-    [ "$(readlink -f "/proc/$p/exe" 2>/dev/null)" = "$AGENT" ] && echo "$p"
-  done
-}
-agent_pids
+# The agent's own ports. NOT 5100 (router) or 5620 (workspace) - those stay up.
+PORTS="8770 8899 8902 8904 8907 1880"
 
-# 2. Kill those, and CONFIRM. pkill has repeatedly reported success while the process survived;
-#    a survivor holds port 8770 and the replacement aborts with "address already in use", which
-#    reads as a broken install rather than a stale process.
-for p in $(agent_pids); do kill -9 "$p" 2>/dev/null; done
+# 1. Stop whatever holds them. lsof is present on both Linux and macOS.
+for p in $PORTS; do
+  pids=$(lsof -ti tcp:"$p" 2>/dev/null) && [ -n "$pids" ] && kill -9 $pids 2>/dev/null
+done
 sleep 3
-[ -z "$(agent_pids)" ] && echo "all stopped" || { echo "STILL RUNNING:"; agent_pids; }
-ss -ltn | grep -E ':8770|:8899' || echo "ports clear"
+
+# 2. CONFIRM they are free. A survivor holds 8770 and the replacement then aborts with
+#    "address already in use", which reads as a broken install rather than a stale process.
+for p in $PORTS; do
+  lsof -ti tcp:"$p" >/dev/null 2>&1 && echo "  STILL BUSY: $p" || echo "  free: $p"
+done
+
+# 3. And confirm the two you did NOT touch are still serving.
+for p in 5100 5620; do
+  lsof -ti tcp:"$p" >/dev/null 2>&1 && echo "  still up: $p" || echo "  DOWN: $p"
+done
+```
+
+If `lsof` is missing, Linux has `fuser -k 8770/tcp 8899/tcp …` and `ss -ltn` to verify. On macOS
+`lsof` is always present. **Do not fall back to `pkill -f`.**
 
 # 3. TRUNCATE THE LOG. agent.log is appended across boots, so lines from the previous run sit above
 #    the new ones and read as current. An installer spent four steps deciding whether
@@ -472,13 +505,13 @@ sleep 40
 Then verify it is **the new process** — not the old one you meant to replace:
 
 ```bash
-ps -o pid,lstart,cmd -p "$(agent_pids | head -1)"
+ps -o pid,lstart,comm -p "$(lsof -ti tcp:8770 | head -1)"
 ```
 
-The same `/proc/<pid>/exe` rule applies to the router
-(`~/hbia-router/hexaeight-router-linux-x64`). For the workspace, `pkill -f 'serve.mjs --port'` is
-safe **only** if your own command line does not contain that string — check with
-`pgrep -af 'serve.mjs --port'` first and kill by PID if it lists your shell.
+The start time must be seconds ago. `lstart` is on both Linux and macOS.
+
+Same approach for the others: the **router** holds 5100, the **workspace** holds 5620. Stop one by
+freeing its port, never by name.
 
 The start time must be seconds ago. The same procedure applies to the router
 (`hexaeight-router-linux-x64`) and the workspace (`serve.mjs --port`).
