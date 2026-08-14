@@ -130,6 +130,47 @@ hexaeight-activate help
 **Check:** `help` lists `install-router`, `upstreams`, `models`, `engine`, `sandbox`,
 `install-workspace`.
 
+### A DIFFERENT PROGRAM MAY OWN THIS NAME — check before you trust it
+
+An unrelated, obsolete npm package (`@hexaeight/sdk`) installs commands with the **same names**:
+`hexaeight-activate`, `hexaeight-renew`, `hexaeight-verify-env`, usually at `/usr/local/bin`. It is
+**not** the tool this guide uses and it cannot do anything described here.
+
+**How you will notice:** `hexaeight-activate help` prompts for a *"Resource Name"* instead of
+listing subcommands. If that happens, you are running the wrong program.
+
+**Check which one is on PATH:**
+
+```bash
+command -v hexaeight-activate
+```
+
+- Under `~/.dotnet/tools/` → correct, carry on.
+- Anywhere else (`/usr/local/bin`, `/usr/bin`) → it is the npm one, and it is shadowing the tool
+  you just installed.
+
+**Do not use it, do not `newtoken` with it, and do not report its output as a failure of this
+guide.** Do not uninstall it either — it is not yours to remove, and other things may reference it.
+
+Simply put the .NET tool first and confirm:
+
+```bash
+export PATH="$HOME/.dotnet:$HOME/.dotnet/tools:$PATH"
+command -v hexaeight-activate      # must now be under ~/.dotnet/tools
+hexaeight-activate help | head -5  # must list subcommands, not ask for a Resource Name
+```
+
+**Export that PATH in every shell you use for the rest of this install.** A new SSH session, a
+`sudo` command, or a script that resets the environment will silently pick the npm one again. If you
+would rather not depend on ordering at all, call it by absolute path throughout:
+
+```bash
+~/.dotnet/tools/hexaeight-activate help
+```
+
+That is unambiguous and cannot be shadowed. Mention to the human that the old npm package is still
+installed and no longer used, so they can remove it themselves when convenient.
+
 ---
 
 ## 3. Router, and a provider key
