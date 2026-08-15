@@ -1,0 +1,75 @@
+{
+  "_comment": [
+    "THE RELEASE MANIFEST. hexaeight-activate reads this to decide which release to install and what",
+    "it must hash to, so a new release is published by updating binaries and this file - not by",
+    "building and republishing the tool.",
+    "",
+    "Two different hashes, answering two different questions:",
+    "  sha256      the DOWNLOADED FILE. Checked before anything is executed.",
+    "  protection  the EXTRACTED ENTRY ASSEMBLY, which is what a build attests on the wire, and what",
+    "              a peer's approved-build gate matches on. It can only be MEASURED by running that",
+    "              build on that platform, so it is filled in after the release - often days later,",
+    "              from whichever machine of that kind is available. An empty string means 'not",
+    "              measured yet'; the tool then measures it locally rather than printing a value",
+    "              nobody produced.",
+    "",
+    "Editing this file changes what every installation fetches. Update the sha256 in the same commit",
+    "as the binary it describes."
+  ],
+
+  "agent": {
+    "repo": "HexaEightTeam/hbia-agent",
+    "tag": "v2026.08.14-r8",
+    "assets": {
+      "win-x64": {
+        "file": "hexaeight-agent-win-x64.exe",
+        "sha256": "06044C64FE53FF1EF7F7334906570FA15BEC211813467080C48EF067F16FAEE7",
+        "protection": ""
+      },
+      "linux-x64": {
+        "file": "hexaeight-agent-linux-x64",
+        "sha256": "7C7806BFF08BBE8574C27F03C1B2D9444D590E29FFE2009861B162B25A50F82C",
+        "protection": ""
+      },
+      "osx-arm64": {
+        "file": "hexaeight-agent-osx-arm64",
+        "sha256": "B36FE65DEF9C7F6173ECE695914535BD8F28448168452AD1C0C5F0D59174E3B9",
+        "protection": ""
+      }
+    }
+  },
+
+  "router": {
+    "repo": "HexaEightTeam/hbia-router",
+    "tag": "v2026.08.14-r6",
+    "assets": {
+      "win-x64": {
+        "file": "hexaeight-router-win-x64.exe",
+        "sha256": "7C48D3FC2E446278838661522CD39177E28BAEFB7BBAF7A58A995CF393B4CA44",
+        "protection": ""
+      },
+      "linux-x64": {
+        "file": "hexaeight-router-linux-x64",
+        "sha256": "FEE0DCD665049A8D925362C7193F6F77814E9D1E0902BE2B043965832FC3EF07",
+        "protection": ""
+      },
+      "osx-arm64": {
+        "file": "hexaeight-router-osx-arm64",
+        "sha256": "855AA50D32518A244D1A0C60ED5DEBCF08AA7203417278A298A1C0796DEEA2E4",
+        "protection": ""
+      }
+    }
+  },
+
+  "workspace": {
+    "repo": "HexaEightTeam/hbia-agent",
+    "tag": "v2026.08.14-ws1",
+    "assets": {
+      "any": {
+        "file": "hexaeight-workspace-dist.zip",
+        "sha256": "CD0755F57C5C14FC1E0C5EF041DB62A80AE7E9EB592A5ADD4F3B8C965E182B5E",
+        "protection": ""
+      }
+    }
+  }
+}
