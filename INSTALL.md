@@ -24,6 +24,73 @@ vendors at very different prices, and the choice is theirs. You need their answe
 
 ---
 
+## FIRST: fix one set of paths, and find what is already installed
+
+Do this before anything else. Two things routinely make one machine look like two, and guessing
+either way is how a working setup gets duplicated or destroyed.
+
+### 1. Resolve HOME once, and use that string everywhere
+
+macOS reports the same directory under more than one path — `/Users/you` and
+`/Volumes/Macintosh_HD/Users/you` are usually **the same place**, reached through a firmlink. A
+shell may report either as its working directory.
+
+```bash
+H="$(cd ~ && pwd -P)"; echo "$H"
+```
+
+Use `$H` for the rest of the install. Do not mix the two spellings in one session.
+
+**If you meet two paths and cannot tell whether they are one directory, ask the filesystem** —
+same device and inode means same directory, whatever the paths look like:
+
+```bash
+stat -f '%d:%i' /Users/you/hbia-agent /Volumes/Macintosh_HD/Users/you/hbia-agent   # macOS
+stat -c '%d:%i' /path/a /path/b                                                    # Linux
+```
+
+Identical output = one directory seen twice. **Different output = genuinely two**, and then you
+must ask the human which is real rather than choose.
+
+### 2. Find what is already running, and adopt it
+
+This guide writes `~/hbia-agent`, `~/hbia-router`, `~/hbia-workspace`. **Those names are a
+convention, not a requirement** — an earlier install may have used `hbia-agent01` or anything else.
+A running component is the authority on where it lives:
+
+```bash
+# macOS
+for p in 8770 5100 5620; do
+  pid=$(lsof -ti tcp:$p 2>/dev/null | head -1)
+  [ -n "$pid" ] && printf "  %-5s pid %-7s %s\n" "$p" "$pid" "$(ps -o comm= -p $pid)"
+done
+# Linux: same, or  readlink -f /proc/<pid>/exe
+```
+
+**Whatever directory the running binary sits in IS that component's directory.** Use it. Do not
+install a second copy next to it because the name does not match this guide — that is how a machine
+ends up with two trees, one of them serving and one of them being configured.
+
+If nothing is running, look for the binaries before assuming a fresh install:
+
+```bash
+ls -d "$H"/hbia-* 2>/dev/null
+ls "$H"/hbia-*/hexaeight-agent-* "$H"/hbia-*/hexaeight-router-* 2>/dev/null
+```
+
+A directory holding only `env-file` and `hexaeight.mac` is licence-only: nothing is installed there
+yet, and it is a fine place to install into. A directory that also holds a binary and a
+`hexaeight-agent.json` is an existing install — **upgrade it in place**, do not start a new one
+elsewhere.
+
+### 3. Say what you found before you change anything
+
+State plainly: which directory each component lives in, which are running, and which you are about
+to write to. If two candidates disagree and the inode test says they are genuinely different, stop
+and ask. One sentence of confirmation costs less than a duplicated install.
+
+---
+
 ## Platform notes — read the one that applies
 
 **macOS**
@@ -60,6 +127,11 @@ Three components, each in its own directory, all sharing one identity:
 | **workspace** | 5620 | the browser UI |
 
 The agent talks to the router over loopback. A browser talks to the agent.
+
+**Throughout this guide, `~/hbia-agent`, `~/hbia-router` and `~/hbia-workspace` mean "the directory
+that component actually uses on this machine"** — as established in the section above. If the agent
+here lives in `hbia-agent01`, then every `cd ~/hbia-agent` in this guide means `cd ~/hbia-agent01`.
+Substitute silently and keep going; do not create the directory this guide happens to name.
 
 ---
 
