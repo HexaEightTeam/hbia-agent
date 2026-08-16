@@ -63,11 +63,11 @@
 
   "workspace": {
     "repo": "HexaEightTeam/hbia-agent",
-    "tag": "v2026.08.14-ws1",
+    "tag": "v2026.08.16-ws2",
     "assets": {
       "any": {
         "file": "hexaeight-workspace-dist.zip",
-        "sha256": "CD0755F57C5C14FC1E0C5EF041DB62A80AE7E9EB592A5ADD4F3B8C965E182B5E",
+        "sha256": "8F914B952BBAF971D07E34D039710F5C0A2F12457928B0CCBD2EF4F1D2DD2D72",
         "protection": ""
       }
     }
