@@ -4,6 +4,19 @@ You are installing a **HexaEight Bridge Identity Agent** on this machine. Follow
 order. **Verify each step before moving on** — every step below has a check, and skipping one
 produces a failure that appears several steps later with a misleading message.
 
+## HOW TO WORK — read this before the first command
+
+- **When this guide is unclear, wrong, or does not match what you actually see: STOP and say so**,
+  quoting the guide's text against the real output. Do not improvise a workaround and carry on. A
+  gap you route around silently is a gap that stays broken for the next person.
+- **Never invent** a path, a route name, a model id, a hash, or a version. If you do not know it,
+  it is discoverable by a command in this guide, or it is a question for the human.
+- **Report what you observed, not what you expected.** Do not call a step done unless its check
+  passed. "It probably worked" is how a broken install reaches step 7 before anyone notices.
+- **Adopt what is already here.** This machine may hold a licence, a running component, or a
+  previous install. The next section finds them. Never recreate or overwrite something that exists
+  because a path in this guide is named differently.
+
 ## TWO THINGS ONLY THE HUMAN CAN DO
 
 Everything else in this guide is yours. These two are not — ask for them, wait, and do not attempt
