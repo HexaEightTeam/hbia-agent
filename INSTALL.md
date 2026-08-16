@@ -65,6 +65,8 @@ check green, and both surface as a turn that will not answer:
 1. **macOS: the jail mask must name the credential FILES, not the licence folder.** The engine is
    started inside the licence folder, so a folder-wide deny kills it instantly with `EPERM`. See
    the macOS section in step 4. **Linux is unaffected.**
+   **Also on macOS: re-sign the downloaded binary** (`codesign -s - -f`) or it is killed on start
+   with `Killed: 9` and nothing says why. Same section.
 2. **The engines must be sealed to an `anthropic`-shaped route.** All three speak anthropic; an
    `-oai-` route fails at the provider with `400 modelCode: does not exist`, which looks like a bad
    model id and is not. See step 5.
@@ -461,6 +463,31 @@ hexaeight-activate sandbox
   AppArmor still blocks unprivileged user namespaces, which is why only actually running it catches
   the problem. Follow the fix it prints, or remove bubblewrap. **Do not start the agent in this
   state.**
+
+### macOS ONLY — re-sign the binary, or it dies with "Killed: 9"
+
+**Do this immediately after any download or upgrade of the agent binary on macOS.**
+
+A binary fetched with `curl` keeps the signature it was published with, and macOS on Apple Silicon
+refuses to run one whose signature does not verify against the file on disk. It does not fail with a
+message about signing: the process is killed outright and the shell prints
+
+```
+Killed: 9
+```
+
+which reads as a crash, an out-of-memory kill, or a corrupt download — anything but a signature. The
+agent simply never starts, and the ports stay closed.
+
+```bash
+cd ~/hbia-agent
+xattr -d com.apple.quarantine ./hexaeight-agent-osx-arm64 2>/dev/null   # harmless if absent
+codesign -s - -f ./hexaeight-agent-osx-arm64
+codesign --verify --strict ./hexaeight-agent-osx-arm64 && echo "signature OK"
+```
+
+`-s -` is an ad-hoc signature, which is all macOS requires here — it is not a developer identity and
+needs no account. **Linux and Windows are unaffected**; skip this section entirely there.
 
 ### macOS ONLY — narrow the jail mask, or no turn will ever answer
 
