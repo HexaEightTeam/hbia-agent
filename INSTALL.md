@@ -743,6 +743,48 @@ sleep 15 && grep -oaE 'https://[a-z0-9-]+\.trycloudflare\.com' /tmp/ws-tunnel.lo
 
 Give the human **that** URL — not the `:5620` one.
 
+**NOW STOP THE WORKSPACE REACHING FOR `localhost` — the tunnel is not finished without this.**
+
+`install-workspace` configures the UI for a browser sitting on this machine. Through a tunnel the
+browser is somewhere else entirely, so `localhost` is the *human's own laptop*, not this server. The
+page loads, sign-in may even work, and then every call to the agent fails against a machine that was
+never running one. Nothing on screen says "wrong host".
+
+Edit `config.js` in the served directory (the one `serve.mjs` runs from):
+
+```bash
+cd ~/.heia/runtime/workspace
+cp config.js config.js.bak_$(date +%Y%m%d_%H%M%S)
+python3 - <<'PY'
+import re
+p = 'config.js'
+s = open(p).read()
+s = re.sub(r"localWorkspace:\s*[^,]+",  "localWorkspace: false", s)
+s = re.sub(r"localAgentPort:\s*[^,]+",  "localAgentPort: null",  s)
+s = re.sub(r"agentLocalUrl:\s*[^,]+",   "agentLocalUrl: ''",     s)
+open(p, 'w').write(s)
+print(s)
+PY
+```
+
+It must end up with the agent reached **by name**, and every local shortcut emptied:
+
+```js
+window.__HEIA_CONFIG = {
+  agent: 'their-agent-name.example.com',   // the identity from step 1 - must NOT be blank
+  localWorkspace: false,                   // resolve via the registry, never localhost
+  localAgentPort: null,
+  agentLocalUrl: '',
+};
+```
+
+**Check:** reload the tunnel URL with the browser console open. No request to `localhost` or
+`127.0.0.1`, and no mixed-content warning. If `agent` is blank the UI has nothing to resolve and
+sign-in fails with no useful message — that value comes from step 1, not from the tunnel.
+
+This applies to **any** remote path — a tunnel, a certificate in front of it, or static hosting. The
+rule is simply: if the browser is not on this machine, the workspace must not reach for `localhost`.
+
 **Tell them this, because it will bite otherwise:** a quick tunnel gets a **new hostname every time
 it restarts**. The agent re-registers itself, so resolving it by name keeps working — but any URL
 someone bookmarked dies. For anything permanent, use a named Cloudflare tunnel (needs a Cloudflare
