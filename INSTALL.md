@@ -24,6 +24,28 @@ vendors at very different prices, and the choice is theirs. You need their answe
 
 ---
 
+## THE WHOLE INSTALL, IN ONE PLACE
+
+This is the shape of it. **Do not run these blind** — each has a check below that catches a failure
+which would otherwise surface three steps later wearing a different message. Read the section when a
+step does not do what this table says.
+
+| # | command | what it gives you |
+|---|---|---|
+| — | `hexaeight-activate newtoken` | the licence. **Human only** |
+| 2 | `dotnet tool install/update --global HexaEight.Activate` | the tool, **1.0.32+** |
+| 3 | `hexaeight-activate install-router` → `upstreams` → `models` | the router, a provider key, and the model list to show the human |
+| 4 | `hexaeight-activate install-agent` | the agent, the pinned toolchain, and the `harness` + `mindmapchat` engines |
+| 4 | `hexaeight-activate sandbox` | proof turns can be confined. **Do not start the agent if this says INSTALLED BUT CANNOT RUN** |
+| 5 | `hexaeight-activate engine --auto` | all three engines sealed against the router, in one pass |
+| 6 | `hexaeight-activate install-workspace` | the browser UI on 5620 |
+| 7 | ask it a question in the browser | proof it works end to end |
+
+Three directories, one identity, and the order matters: the router must answer before the agent
+starts, and the agent must be sealed before the workspace shows anything.
+
+---
+
 ## FIRST: fix one set of paths, and find what is already installed
 
 Do this before anything else. Two things routinely make one machine look like two, and guessing
@@ -227,6 +249,20 @@ hexaeight-activate help
 **Check:** `help` lists `install-router`, `upstreams`, `models`, `engine`, `sandbox`,
 `install-workspace`.
 
+**Check the version — 1.0.32 or newer:**
+
+```bash
+dotnet tool list -g | grep -i hexaeight.activate
+```
+
+Older tools cannot do step 5 in one pass: `engine --auto` does not exist before 1.0.32, and
+`install-agent` does not fetch the `harness` and `mindmapchat` engines. If the version is older and
+`dotnet tool update` did not move it, the `||` above short-circuited — run the update on its own:
+
+```bash
+dotnet tool update --global HexaEight.Activate
+```
+
 ### A DIFFERENT PROGRAM MAY OWN THIS NAME — check before you trust it
 
 An unrelated, obsolete npm package (`@hexaeight/sdk`) installs commands with the **same names**:
@@ -369,8 +405,16 @@ hexaeight-activate install-agent
 
 This writes `hexaeight-agent.json` with the keys that matter, including `llmPort` (without it no
 engine can reach a model) and `loadDependencies` (without it Node-RED is declared but never hosted).
-It also installs the pinned toolchain, including the Claude CLI version engines are known to work
-with.
+
+It also installs everything the engines need, so step 5 has binaries to point at:
+
+- the pinned toolchain, including the Claude CLI version engines are known to work with
+- the `harness` and `mindmapchat` engines, downloaded from the same release as the agent and
+  verified by SHA-256 the same way
+
+**Check:** the last lines mention both engines. A `SKIPPED` or a failure here is not fatal to the
+install — the agent is already verified — but step 5 will report that engine as missing, so re-run
+this command rather than continuing without it.
 
 **Check the sandbox before starting the agent:**
 
@@ -379,50 +423,82 @@ hexaeight-activate sandbox
 ```
 
 - `WORKING` — good.
-- `NOT INSTALLED` — turns run unconfined. Report it; the human decides whether to
-  `sudo apt-get install -y bubblewrap`.
+- `NOT INSTALLED` — turns run **unconfined**, with write access to the folder holding `env-file` and
+  `hexaeight.mac`. On Linux `install-agent` already tried `sudo -n apt-get install -y bubblewrap`; if
+  it is still missing, sudo needed a password. Run it yourself:
+  `sudo apt-get install -y bubblewrap`. (macOS never hits this — see the platform note.)
 - `INSTALLED BUT CANNOT RUN` — **this is the dangerous one.** The agent picks its sandbox by
   existence, so it will wrap every spawn in something that fails, and every turn dies with "the
-  engine exited without replying". Follow the fix it prints, or remove bubblewrap. **Do not start
-  the agent in this state.**
+  engine exited without replying". This is the Ubuntu 24.04 case: the package installs cleanly and
+  AppArmor still blocks unprivileged user namespaces, which is why only actually running it catches
+  the problem. Follow the fix it prints, or remove bubblewrap. **Do not start the agent in this
+  state.**
 
 ---
 
-## 5. Point an engine at the router
+## 5. Point the engines at the router
+
+Every install gets **three** engines. Seal them in one pass:
 
 ```bash
 cd ~/hbia-agent
-hexaeight-activate engine
+hexaeight-activate engine --auto
 ```
 
-It asks six things:
+| engine | what it is |
+|---|---|
+| `claude` | the pinned Claude Code CLI |
+| `harness` | a drop-in for `claude -p` — same flags, same stream-json frames |
+| `mindmapchat` | the same loop plus the fact ledger, captured procedures and the mind map |
+
+It asks **three** things, once, and applies them to all three engines — they all speak the anthropic
+dialect through the same router, so there is nothing to answer per engine:
 
 | asked | answer |
 |---|---|
-| engine name | `claude` (skills replay on the name they were recorded with) |
-| what it speaks | `1` for the Claude CLI |
-| route name | e.g. `claude-ant-aws` — must match a route from step 3 |
+| route | e.g. `claude-ant-aws` — must match a route from step 3 |
 | provider's model id | the id `models` printed, e.g. `us.anthropic.claude-sonnet-4-20250514-v1:0` |
 | router | `<router identity name>\|http://127.0.0.1:5100` |
-| working directory | accept the default |
 
 The model field becomes `<route>|<model id>`: the router globs the left half to pick an upstream and
 sends the right half to the provider. That is why a route name never has to be a real model id.
 
-The binary is not asked for — a Claude engine always uses the pinned CLI.
+Binaries are not asked for. All three come from the pinned copies under `.heia/runtime` that step 4
+installed — never from whatever is on `PATH`.
 
-**Check:**
+Non-interactive (an installer that already knows the answers):
+
+```bash
+hexaeight-activate engine --auto \
+  --route claude-ant-aws \
+  --model us.anthropic.claude-sonnet-4-20250514-v1:0 \
+  --router "<router identity name>|http://127.0.0.1:5100"
+```
+
+**If an engine says SKIPPED**, its binary is missing — the message names the path it looked for.
+`claude` comes from `install-runtime`; `harness` and `mindmapchat` come from `install-agent`. Re-run
+whichever it names; do not seal around it.
+
+Bare `hexaeight-activate engine` (no `--auto`) still exists for a *non-standard* engine — codex, an
+OpenAI-shaped CLI, something with its own binary. It asks the longer set of questions, once per
+engine. You do not need it for a normal install.
+
+**Check — all three, not just one:**
 
 ```bash
 ./hexaeight-agent-* export --plaintext --out /tmp/e.json && \
-python3 -c "import json;e=json.load(open('/tmp/e.json'))['claude'];\
-print('file   ',e['file']);print('approve',e['approve']);\
-print('skills ',list(e.get('skills',{}).keys()));print('model  ',e['proxy']['model'])" && rm /tmp/e.json
+python3 -c "import json;d=json.load(open('/tmp/e.json'));\
+[print(f\"{n:12} file={e['file'].split('/')[-1]:20} approve={e['approve']} \
+skills={list(e.get('skills',{}).keys())} model={e['proxy']['model']}\") \
+for n,e in d.items()]" && rm /tmp/e.json
 ```
 
-Must show: `file` under `.heia/runtime`, `approve False`, `skills ['dir','priming']`, and a model
-containing `|`. **If `skills` is missing the engine will have no skill tools at all** — and the only
+Every row must show `approve=False`, `skills=['dir','priming']`, and a model containing `|`.
+**If `skills` is missing on any engine, that engine has no skill tools at all** — and the only
 symptom will be a later failure saying one specific tool is unavailable.
+
+The workspace lists only engines the agent actually serves, so if one is missing here it will simply
+not appear in the UI later. That is the intended behaviour, not a UI fault.
 
 Start the agent:
 
@@ -665,6 +741,10 @@ account) or a real DNS name plus a certificate, and set `reach` to
 ## 7. Prove it end to end
 
 Open the workspace, sign in with the agent name and the human's email, and send one message.
+
+**The rail lists only engines this agent actually serves.** You should see `claude`, `harness` and
+`mindmapchat`. An engine missing here was not sealed in step 5 — go back and check its row rather
+than looking for a UI fault. An engine you never configured is *supposed* to be absent.
 
 ```bash
 grep -aE "as .*via" ~/hbia-router/router.log | tail -2
