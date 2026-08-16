@@ -447,6 +447,57 @@ hexaeight-activate sandbox
   the problem. Follow the fix it prints, or remove bubblewrap. **Do not start the agent in this
   state.**
 
+### macOS ONLY — narrow the jail mask, or no turn will ever answer
+
+**Do this on macOS before the first turn. Skipping it produces a working-looking install in which
+every engine dies instantly**, with the same "the engine exited without replying" as a dozen other
+causes.
+
+By default the jail hides the agent's **whole current directory** — which is the licence folder — so
+that an engine cannot read `env-file` or `hexaeight.mac`. On Linux the engine is moved out of that
+folder before it starts, so it never notices. **On macOS it is not moved**, so it starts inside a
+directory it is forbidden to read and dies immediately with `EPERM`.
+
+Mask the credential **files** instead of the folder. Same protection, and the engine can start:
+
+```bash
+cd ~/hbia-agent
+cp hexaeight-agent.json hexaeight-agent.json.bak_$(date +%Y%m%d_%H%M%S)
+python3 - <<'PY'
+import json, os
+p = 'hexaeight-agent.json'
+d = json.load(open(p))
+# BOTH path forms. macOS reaches one directory by two names through a firmlink
+# (/Users/... and /Volumes/Macintosh_HD/Users/...). One entry is enough in practice — the
+# sandbox resolves to the real file — but listing both costs nothing and survives a layout change.
+mask = sorted(os.path.join(b, f)
+              for b in {os.path.realpath('.'), os.path.abspath(os.path.expanduser('~/hbia-agent'))}
+              for f in ('env-file', 'hexaeight.mac', 'agent.uuid'))
+d['jail'] = {'enabled': True, 'mask': mask}
+json.dump(d, open(p, 'w'), indent=2)
+print(json.dumps(d['jail'], indent=1))
+PY
+```
+
+Restart the agent, then **prove both halves** — the engine can start, and the credentials are still
+hidden. Build the profile exactly as the agent does and test it:
+
+```bash
+cd ~/hbia-agent
+M=$(python3 -c "import json;print(' '.join('(subpath \"%s\")'%m for m in json.load(open('hexaeight-agent.json'))['jail']['mask']))")
+P="(version 1)(allow default)(deny file-read* $M)"
+/usr/bin/sandbox-exec -p "$P" ~/.heia/runtime/node_modules/.bin/claude --version   # must print a version
+/usr/bin/sandbox-exec -p "$P" /bin/cat env-file                                    # must say Operation not permitted
+```
+
+**A version plus an `Operation not permitted` is the pass.** A version with a readable `env-file`
+means the mask is wrong and the engine can read the licence — stop and fix it. `EPERM` from the
+first command means the mask still covers the whole folder.
+
+Note this is narrower than the Linux default: the engine can read other files in that folder
+(`sessions.he`, `engines.he`), which are encrypted at rest. The credentials themselves are not
+readable, which is what the mask is for.
+
 ---
 
 ## 5. Point the engines at the router
