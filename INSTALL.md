@@ -635,17 +635,24 @@ not appear in the UI later. That is the intended behaviour, not a UI fault.
 ### Adding another engine later
 
 `engine --auto` only ever handles the three standard ones, and re-running it is safe — it re-seals
-them in place. For anything else (codex, an OpenAI-shaped CLI, a second Claude on a different
-model), use the interactive form, one engine at a time:
+them in place.
+
+**Those three are the whole set this install provides. Do not add others uninvited.** Codex, grok,
+llxprt and the framework engines are **not shipped and not installed** — HBIA does not put them on
+the machine and there is nothing to point an engine at. If the human has installed one themselves
+and asks for it, wire it up; otherwise finish with the three and say so.
+
+For such an engine, use the interactive form, one at a time:
 
 ```bash
 cd ~/hbia-agent && hexaeight-activate engine
 ```
 
-The same dialect rule decides everything: **pick the route whose `shape` matches what that engine
-speaks** — anthropic for Claude-shaped, openai for OpenAI-shaped, responses for Codex. The
-interactive command shows you only the routes serving the dialect you chose, and warns when none
-does. Restart the agent afterwards; engines are read at startup.
+It asks for the binary's absolute path — which must already exist — and the same dialect rule
+decides the route: **pick the route whose `shape` matches what that engine speaks** — anthropic for
+Claude-shaped, openai for OpenAI-shaped, responses for Codex. The interactive command lists only the
+routes serving the dialect you chose and warns when none does. Restart the agent afterwards; engines
+are read at startup.
 
 Start the agent:
 
@@ -667,6 +674,21 @@ hexaeight-activate install-workspace --agent <agent identity name from step 1>
 
 **Check:** it reports `browser auth … MB` (the WASM runtime) and writes a deployment config naming
 your agent.
+
+**Check the bundle is new enough to KNOW your engines.** The rail can only list an engine whose name
+is compiled into the bundle. An older bundle omits `harness` and `mindmapchat` entirely, so they are
+sealed, served, and simply never appear — with nothing on screen to say why:
+
+```bash
+cd ~/.heia/runtime/workspace
+for e in claude harness mindmapchat; do
+  printf '  %-12s %s\n' "$e" "$(grep -rlo "$e" assets/*.js 2>/dev/null | wc -l) asset file(s)"
+done
+```
+
+Each must be **1 or more**. A `0` for `harness` or `mindmapchat` means the deployed bundle predates
+them — re-run `hexaeight-activate install-workspace` to fetch the current one, and if it still shows
+`0`, the machine is pinned to an old release rather than misconfigured.
 
 Serve it:
 
@@ -829,18 +851,44 @@ If yes, **both** the agent and the workspace need to be reachable over HTTPS, fo
 the agent because the browser and the mobile app talk to it, the workspace because WebCrypto and
 loopback-fetch rules make plain HTTP unusable.
 
-**Install cloudflared** — it is a system binary, not an npm package:
+**Install cloudflared** — it is a system binary, not an npm package.
+
+**Prefer a LOCAL install (`~/bin`) and do not fight for a system-wide one.** A managed or corporate
+machine often refuses `sudo mv` into `/usr/local/bin`, or has no Homebrew, and that refusal is not
+worth working around: a binary in the user's own `~/bin` works exactly as well, because the agent is
+told the **absolute path** below rather than searching `PATH`.
 
 ```bash
-# Linux
-curl -sL -o /tmp/cloudflared \
-  https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
-chmod +x /tmp/cloudflared && sudo mv /tmp/cloudflared /usr/local/bin/cloudflared
-cloudflared --version
+mkdir -p ~/bin
 
-# macOS
-brew install cloudflared
+# macOS (Apple Silicon)
+curl -sL -o ~/bin/cloudflared \
+  https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-arm64.tgz
+tar -xzf ~/bin/cloudflared -C ~/bin && rm -f ~/bin/cloudflared.tgz 2>/dev/null
+
+# Linux x64
+curl -sL -o ~/bin/cloudflared \
+  https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+
+chmod +x ~/bin/cloudflared
+~/bin/cloudflared --version
 ```
+
+Homebrew (`brew install cloudflared`) and a system-wide install are both fine if they work — the
+point is only that a local one is enough, so a blocked `sudo` is not a blocker.
+
+**THE AGENT DOES NOT SEARCH YOUR SHELL'S `PATH`.** It runs as a daemon with its own environment, and
+`~/bin` is almost never on it. Installing to `~/bin` and stopping there produces exactly this, with
+everything else looking healthy:
+
+```
+[reach] cloudflared could not start (... No such file or directory)
+[register] SKIPPED - nothing to publish
+```
+
+`register SKIPPED` means the agent never publishes its URL, so it **cannot be resolved by name** —
+the workspace can only reach it if you happen to have a tunnel up by hand. So whenever cloudflared
+is not on a system path, name it explicitly in the next step with `"bin"`.
 
 **Point the agent at it.** Installing the binary is not enough — the agent must be told to use it,
 and to publish the resulting URL:
@@ -848,11 +896,17 @@ and to publish the resulting URL:
 ```bash
 cd ~/hbia-agent
 python3 - <<'PY'
-import json
+import json, os, shutil
 p = 'hexaeight-agent.json'
 d = json.load(open(p))
-d['reach'] = {'mode': 'cloudflared'}   # agent starts its own tunnel and publishes that URL
-d['register'] = True                    # and lists it in the registry, so it resolves by NAME
+# THE ABSOLUTE PATH, ALWAYS. Found here, where a login shell's PATH is available; the agent's
+# own environment will not have ~/bin on it, and "cloudflared" alone fails with
+# "No such file or directory" while the binary sits happily in the user's home.
+binpath = shutil.which('cloudflared') or os.path.expanduser('~/bin/cloudflared')
+if not os.path.exists(binpath):
+    raise SystemExit(f"cloudflared not found at {binpath} - install it first, then re-run this")
+d['reach'] = {'mode': 'cloudflared', 'bin': binpath}   # starts its own tunnel, publishes that URL
+d['register'] = True                                   # and lists it, so it resolves by NAME
 json.dump(d, open(p, 'w'), indent=2)
 print(json.dumps({k: d[k] for k in ('reach', 'register')}, indent=1))
 PY
@@ -947,6 +1001,40 @@ grep -aE "as .*via" ~/hbia-router/router.log | tail -2
 ```
 
 Left of `as` is the route; right is what the provider was actually asked for.
+
+---
+
+## 8. FINISH BY HANDING OVER THE URL
+
+An install is not delivered until the human knows where to click. Do not end with "the workspace is
+running on port 5620" — that is a fact about your terminal, not an address they can open. Print the
+**one URL they should use**, and say plainly which it is:
+
+```bash
+# The tunnel URL, when there is one (step 6b) — this is the one to give them.
+grep -oaE 'https://[a-z0-9-]+\.trycloudflare\.com' /tmp/ws-tunnel.log 2>/dev/null | tail -1
+# Otherwise, only if their browser is on THIS machine:
+echo "http://localhost:5620"
+```
+
+End your report with exactly this, filled in:
+
+```
+  Workspace:  https://<the-url>
+  Sign in as: <their email>
+  Agent:      <agent identity name>
+  Engines:    claude, harness, mindmapchat
+```
+
+Rules for that hand-over, because each has produced a "it doesn't work" that was not a fault:
+
+- **Give ONE url.** Listing the tunnel and `localhost:5620` together invites the wrong choice.
+- **Never hand over `http://localhost:5620` unless the browser is on this machine.** From anywhere
+  else it resolves to *their* laptop, and the sign-in failure that follows says nothing about hosts.
+- **A quick tunnel's hostname changes on every restart.** Say so when you hand it over, so a dead
+  bookmark tomorrow is expected rather than alarming.
+- **If `register` was SKIPPED** (step 6b), say that too: the agent is not resolvable by name, so that
+  URL is the only way in until cloudflared is wired up properly.
 
 ---
 
