@@ -53,6 +53,8 @@ step does not do what this table says.
 | 5 | `hexaeight-activate engine --auto` | all three engines sealed against the router, in one pass |
 | 6 | `hexaeight-activate install-workspace` | the browser UI on 5620 |
 | 7 | ask it a question in the browser | proof it works end to end |
+| 7b | `hexaeight-activate autostart on` | it all comes back after a reboot. **Without this, nothing does** |
+| 8 | hand over the workspace URL | the human knows where to click |
 
 Three directories, one identity, and the order matters: the router must answer before the agent
 starts, and the agent must be sealed before the workspace shows anything.
@@ -1001,6 +1003,47 @@ grep -aE "as .*via" ~/hbia-router/router.log | tail -2
 ```
 
 Left of `as` is the route; right is what the provider was actually asked for.
+
+---
+
+## 7b. Survive a reboot — do this before you hand over
+
+Everything you started above was launched by hand with `nohup`. **None of it comes back after a
+restart.** The human reboots, opens the URL you gave them, and finds nothing — which reads as an
+install that never worked rather than one that was never made persistent.
+
+```bash
+hexaeight-activate autostart on
+hexaeight-activate autostart status
+```
+
+This writes **launchd agents** on macOS (`~/Library/LaunchAgents`) and **systemd --user** units on
+Linux, and it encodes the ordering the components actually need: the router first, the agent once
+`:5100` answers, the workspace once `:8770` does. That ordering cannot be expressed in launchd, so
+it is enforced by waiting for the port rather than by a sleep that guesses — which is why this is a
+command and not three plist files you write yourself.
+
+**Check:** `autostart status` lists all three as loaded. Then prove it for real — this is the only
+check that means anything:
+
+```bash
+sudo reboot        # or have the human reboot
+# after it comes back, from a fresh shell:
+hexaeight-activate autostart status
+for p in 5100 8770 5620; do
+  (echo > /dev/tcp/127.0.0.1/$p) 2>/dev/null && echo "  $p up" || echo "  $p DOWN"
+done
+```
+
+On Linux, `systemd --user` units only run while that user has a session unless lingering is enabled.
+If the ports are down after a reboot on a headless box, that is the cause:
+
+```bash
+sudo loginctl enable-linger "$USER"
+```
+
+To undo any of this: `hexaeight-activate autostart off` (leaves running processes alone), or see
+UNINSTALL.md.
 
 ---
 
