@@ -68,6 +68,9 @@ check green, and both surface as a turn that will not answer:
 2. **The engines must be sealed to an `anthropic`-shaped route.** All three speak anthropic; an
    `-oai-` route fails at the provider with `400 modelCode: does not exist`, which looks like a bad
    model id and is not. See step 5.
+3. **A personal `~/.claude/settings.json` overrides HBIA and takes the `claude` engine off the
+   router** — same misleading `400`. Check for it in step 5, tell the human, and **ask** before
+   touching their file. `harness` and `mindmapchat` are immune.
 
 ---
 
@@ -633,6 +636,75 @@ message that does not mention routing.
 
 The workspace lists only engines the agent actually serves, so if one is missing here it will simply
 not appear in the UI later. That is the intended behaviour, not a UI fault.
+
+### CHECK FOR A PERSONAL CLAUDE CONFIG — it silently takes the claude engine off the router
+
+**Run this check. Do not change anything yet — the answer is the human's to give.**
+
+```bash
+python3 - <<'PY'
+import json, os
+p = os.path.expanduser('~/.claude/settings.json')
+if not os.path.exists(p):
+    print('clean - no ~/.claude/settings.json'); raise SystemExit
+env = json.load(open(p)).get('env', {})
+hit = {k: v for k, v in env.items() if 'ANTHROPIC' in k.upper() and 'URL' in k.upper()}
+print(f'FOUND in {p}:') if hit else print('clean - no ANTHROPIC url set there')
+for k, v in hit.items(): print(f'   {k} = {v}')
+PY
+```
+
+**If it says clean, skip this section entirely.**
+
+**If it found one, stop and tell the human this, in these terms:**
+
+> Your personal Claude Code is configured to send requests to `<the url>`. The Claude CLI applies
+> that file's settings **over** anything HBIA passes it, so the `claude` engine here will ignore the
+> router and send turns straight to that address — no routing, no policy, no per-turn nonce, and the
+> key in that file gets spent directly. It shows up as `400 modelCode: does not exist`, which looks
+> like a wrong model and is not.
+>
+> Nothing in HBIA can override it. `CLAUDE_CONFIG_DIR`, `--settings` and overriding `HOME` were all
+> tried and none of them move it — the CLI resolves that file from your OS user record.
+>
+> I can move those two keys out of `~/.claude/settings.json` and into your shell profile instead.
+> Your own `claude` keeps working exactly as now; HBIA's engine never sees a shell, so it gets the
+> router. **Shall I?**
+
+**Then wait. Do not edit that file without a yes.** It is their personal setup, not part of this
+install.
+
+**If they say yes:**
+
+```bash
+cp ~/.claude/settings.json ~/.claude/settings.json.bak_$(date +%Y%m%d_%H%M%S)
+python3 - <<'PY'
+import json, os
+p = os.path.expanduser('~/.claude/settings.json')
+d = json.load(open(p)); env = d.get('env', {})
+moved = {k: env.pop(k) for k in list(env)
+         if k.upper() in ('ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN')}
+d['env'] = env; json.dump(d, open(p, 'w'), indent=2)
+rc = os.path.expanduser('~/.zshrc' if os.environ.get('SHELL','').endswith('zsh') else '~/.bashrc')
+with open(rc, 'a') as f:
+    f.write('\n# personal claude. NOT in ~/.claude/settings.json - that file overrides the\n')
+    f.write('# environment and would send HBIA engine turns here too, bypassing the router.\n')
+    for k, v in moved.items(): f.write(f'export {k}={v}\n')
+print('moved to', rc, ':', list(moved))
+PY
+```
+
+Tell them to run `source ~/.zshrc` in any terminal already open — existing shells do not pick it up
+on their own, and their personal `claude` will look broken until they do.
+
+**If they say no, that is a fine answer.** Say plainly what it costs and carry on:
+
+> Then the `claude` engine will not work here, and I will leave it configured but unusable.
+> **`harness` and `mindmapchat` are unaffected** — they are HexaEight's own engines, they honour the
+> address HBIA gives them, and they go through the router correctly. Use those. The rest of the
+> install is unchanged.
+
+Do not argue the point, and do not quietly edit the file anyway.
 
 ### Adding another engine later
 
