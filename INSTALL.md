@@ -57,6 +57,16 @@ step does not do what this table says.
 Three directories, one identity, and the order matters: the router must answer before the agent
 starts, and the agent must be sealed before the workspace shows anything.
 
+**THE TWO THAT SILENTLY PRODUCE A DEAD INSTALL.** Both leave every component running and every
+check green, and both surface as a turn that will not answer:
+
+1. **macOS: the jail mask must name the credential FILES, not the licence folder.** The engine is
+   started inside the licence folder, so a folder-wide deny kills it instantly with `EPERM`. See
+   the macOS section in step 4. **Linux is unaffected.**
+2. **The engines must be sealed to an `anthropic`-shaped route.** All three speak anthropic; an
+   `-oai-` route fails at the provider with `400 modelCode: does not exist`, which looks like a bad
+   model id and is not. See step 5.
+
 ---
 
 ## FIRST: fix one set of paths, and find what is already installed
@@ -515,14 +525,47 @@ hexaeight-activate engine --auto
 | `harness` | a drop-in for `claude -p` — same flags, same stream-json frames |
 | `mindmapchat` | the same loop plus the fact ledger, captured procedures and the mind map |
 
-It asks **three** things, once, and applies them to all three engines — they all speak the anthropic
-dialect through the same router, so there is nothing to answer per engine:
+It asks **three** things, once, and applies them to all three engines:
 
 | asked | answer |
 |---|---|
-| route | e.g. `claude-ant-aws` — must match a route from step 3 |
+| route | **an `anthropic`-shaped route** — see the rule below. Getting this wrong is the #1 way to end up with an install that looks finished and cannot answer |
 | provider's model id | the id `models` printed, e.g. `us.anthropic.claude-sonnet-4-20250514-v1:0` |
 | router | `<router identity name>\|http://127.0.0.1:5100` |
+
+#### THE ROUTE MUST BE ANTHROPIC-SHAPED. This is not a preference.
+
+**All three engines speak the ANTHROPIC dialect** — they are Claude-CLI-shaped programs. The router
+picks an upstream by matching **both** the route glob **and** the dialect. Hand these engines a route
+whose `shape:` is anything else and there is no working combination: the turn dies at the provider,
+not at the router, with an error that never mentions dialects. A real one:
+
+```
+API Error: 400 [1214][modelCode: does not exist]
+```
+
+That reads like a wrong model id. It is not — it is the right model sent to the wrong kind of
+endpoint. Nothing upstream of it says so.
+
+**Read the routes and pick by `shape`, never by the name:**
+
+```bash
+grep -A2 'match:' ~/hbia-router/upstreams.yaml
+```
+
+```yaml
+  - match:     "*-ant-aws"        # shape: anthropic  <-- USE THIS ONE
+    shape:     "anthropic"
+  - match:     "*-oai-aws"        # shape: openai     <-- NOT for these engines
+    shape:     "openai"
+```
+
+The `-ant-` / `-oai-` in a route name is a **convention that encodes the dialect**, not decoration.
+`glm-ant-aws` and `glm-oai-aws` can point at the same provider and the same key and still be
+completely different routes. If both exist, these engines take the `-ant-` one.
+
+**If no route has `shape: anthropic`, stop.** Do not seal an engine against an openai route and hope.
+Add an anthropic upstream first (`hexaeight-activate upstreams`, step 3), then come back.
 
 The model field becomes `<route>|<model id>`: the router globs the left half to pick an upstream and
 sends the right half to the provider. That is why a route name never has to be a real model id.
@@ -561,8 +604,48 @@ Every row must show `approve=False`, `skills=['dir','priming']`, and a model con
 **If `skills` is missing on any engine, that engine has no skill tools at all** — and the only
 symptom will be a later failure saying one specific tool is unavailable.
 
+**And check the dialect actually agrees** — the check that would have caught the failure above:
+
+```bash
+ROUTE=$(./hexaeight-agent-* export --plaintext --out /dev/stdout 2>/dev/null \
+        | python3 -c "import json,sys;print(json.load(sys.stdin)['claude']['proxy']['model'].split('|')[0])")
+echo "engines are sealed to route: $ROUTE"
+python3 - "$ROUTE" <<'PY'
+import re, sys, glob
+route = sys.argv[1]
+for f in glob.glob('/'.join(__import__('os').path.expanduser('~/hbia-router/upstreams.yaml').split('/'))):
+    txt = open(f).read()
+for m, s in re.findall(r'match:\s*"([^"]+)"\s*\n\s*shape:\s*"([^"]+)"', txt):
+    if re.fullmatch(m.replace('*', '.*'), route):
+        print(f"  matches upstream {m} with shape={s}")
+        print("  OK — anthropic" if s == "anthropic"
+              else f"  WRONG — these engines speak anthropic, this route is {s}. Re-run engine --auto with an anthropic route.")
+        break
+else:
+    print("  NO UPSTREAM MATCHES THIS ROUTE — every turn will fail. Fix step 3 or re-run engine --auto.")
+PY
+```
+
+It must say **OK — anthropic**. Anything else means the turns will fail at the provider with a
+message that does not mention routing.
+
 The workspace lists only engines the agent actually serves, so if one is missing here it will simply
 not appear in the UI later. That is the intended behaviour, not a UI fault.
+
+### Adding another engine later
+
+`engine --auto` only ever handles the three standard ones, and re-running it is safe — it re-seals
+them in place. For anything else (codex, an OpenAI-shaped CLI, a second Claude on a different
+model), use the interactive form, one engine at a time:
+
+```bash
+cd ~/hbia-agent && hexaeight-activate engine
+```
+
+The same dialect rule decides everything: **pick the route whose `shape` matches what that engine
+speaks** — anthropic for Claude-shaped, openai for OpenAI-shaped, responses for Codex. The
+interactive command shows you only the routes serving the dialect you chose, and warns when none
+does. Restart the agent afterwards; engines are read at startup.
 
 Start the agent:
 
