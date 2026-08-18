@@ -1195,3 +1195,45 @@ nothing. In order of likelihood:
 And if turns work but the model says a skill tool is unavailable: the engine is missing its
 `skills` block, so it was given no skill tools at all. Re-run `hexaeight-activate engine` and
 **restart the agent** — an existing engine's definition is not rebuilt while it runs.
+
+---
+
+## Upgrading an existing install — run this at the end
+
+The priming that teaches an engine how to use its tools is **sealed into each engine** when the
+engine is set up. Upgrading the agent does not change it: a machine installed months ago keeps the
+priming it was sealed with, and nothing says so. A corrected priming therefore has no effect on any
+existing install until the engines are re-sealed.
+
+So after any upgrade, as the last step:
+
+```bash
+dotnet tool update --global HexaEight.Activate      # 1.0.37 or newer
+cd ~/hbia-agent01                                   # the folder holding engines.he
+hexaeight-activate engine --validate
+hexaeight-activate restart agent
+```
+
+`--validate` reads what is actually sealed, compares each engine's priming version against the one
+shipped in the tool, and re-seals **only** those behind it. It asks nothing: the route, model,
+router and argv come from the entry already on the machine, and only the priming is replaced. It
+prints one line per engine it repairs:
+
+```
+  harness: priming v0 -> v2, re-sealing (route and model unchanged)
+  3 engine(s) updated to priming v2.
+```
+
+Nothing to repair prints nothing — it is safe to run every time, and it runs automatically as part
+of `hexaeight-activate engine --auto`.
+
+**The restart is not optional.** The agent reads its engines at startup, so a re-seal has no effect
+on a running agent.
+
+To see what is sealed right now, in plain text:
+
+```bash
+cd ~/hbia-agent01
+./hexaeight-agent-linux-x64 export --plaintext --out /tmp/engines.json
+head -1 /tmp/engines.json        # audit dump only; there is no plaintext import
+```

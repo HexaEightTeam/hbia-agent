@@ -7,11 +7,24 @@
     "Two different hashes, answering two different questions:",
     "  sha256      the DOWNLOADED FILE. Checked before anything is executed.",
     "  protection  the EXTRACTED ENTRY ASSEMBLY, which is what a build attests on the wire, and what",
-    "              a peer's approved-build gate matches on. It can only be MEASURED by running that",
-    "              build on that platform, so it is filled in after the release - often days later,",
-    "              from whichever machine of that kind is available. An empty string means 'not",
-    "              measured yet'; the tool then measures it locally rather than printing a value",
-    "              nobody produced.",
+    "              a peer's approved-build gate matches on.",
+    "",
+    "PROTECTION HASHES NO LONGER NEED A MACHINE OF THAT KIND. With PublishSingleFile plus",
+    "IncludeAllContentForSelfExtract the entry dll is embedded VERBATIM and UNCOMPRESSED in the",
+    "bundle - verified byte-for-byte - so what a platform extracts at first run is exactly the dll",
+    "the build produced. Hashing the build's own intermediate dll therefore yields the same value on",
+    "any host. Confirmed on linux-x64 by measuring both ways and getting one number, and the builds",
+    "are reproducible (two independent builds of r14 produced identical hashes).",
+    "",
+    "That also retires the trap that made the old ceremony fragile: ~/.net/<exe-name>/ is keyed on",
+    "the EXECUTABLE FILENAME, which every release reuses, so it accumulates one directory per",
+    "release and 'newest by mtime' was a guess.",
+    "",
+    "ENGINES ARE PUBLISHED HERE TOO, as engine-harness and engine-mindmapchat. They used to live",
+    "only inside HexaEight.Activate, which meant every engine rebuild required a nuget release - an",
+    "irreversible publish to ship a number about a file on GitHub, and a window in between where",
+    "install-agent downloaded a good binary and deleted it as unverified. An engine fix now ships",
+    "like an agent fix: new binaries, one commit here.",
     "",
     "Editing this file changes what every installation fetches. Update the sha256 in the same commit",
     "as the binary it describes."
@@ -19,21 +32,65 @@
 
   "agent": {
     "repo": "HexaEightTeam/hbia-agent",
-    "tag": "v2026.08.17-r13",
+    "tag": "v2026.08.18-r14",
     "assets": {
       "win-x64": {
         "file": "hexaeight-agent-win-x64.exe",
-        "sha256": "489177646F0862FC3C544CDB4A1165F55342677F2AC6975F439C194734C05234",
-        "protection": ""
+        "sha256": "780F58CB811BF720F0FE019F21AFE332A7AFFFF6AC86A76387F3CD6B1D7C7515",
+        "protection": "E72AF23C409E4D10F7C3138758E18E9D35C3908DF97C1816620818FC309260E25ED50101830EF30F014E0D8D6D9F9C7DA2E9228594DA4E76B2F4DDCBE678D1B2"
       },
       "linux-x64": {
         "file": "hexaeight-agent-linux-x64",
-        "sha256": "18777532726EA21CDBEBFE6E884C3DE3A03DDC8478E7FC9BE475C9053773076B",
-        "protection": ""
+        "sha256": "0570C3973DFC1AFA9D57D57C60546AF3DADD5BD84C3B1ACEC222D7B7427D5B0A",
+        "protection": "77727C7AC35D3F4B55F129D5CF266C7609C574FD73E567BC454EA0D835049037AA623DBB0A9A398152FD0E2905F40CEE7B101EF0D194E659E4CA29A0C4B41CF4"
       },
       "osx-arm64": {
         "file": "hexaeight-agent-osx-arm64",
-        "sha256": "ABA721A3EBA3A0340CDC607B04D2220BE2ACDD143689C14A38056C1663FAADBF",
+        "sha256": "6E8C7C1E37BD06574820AB480EF213E4A62D1BF9C9C12856A23F9EE68D3B26D1",
+        "protection": "390BA4D78BD22CCEBE50F260E20057B81F25E74A20CCF9AD3A52CEAAFD46F3850B5AD8AB80DEA854A8E275307A789ABCF74D0152E1BA056A890E4A336BB346FD"
+      }
+    }
+  },
+
+  "engine-harness": {
+    "repo": "HexaEightTeam/hbia-agent",
+    "tag": "v2026.08.18-r14",
+    "assets": {
+      "win-x64": {
+        "file": "hexaeight-engine-win-x64.exe",
+        "sha256": "5643929DDF15A5E446F401B776B075628E0AB625740F4AE9956B64EFC3F81F0B",
+        "protection": ""
+      },
+      "linux-x64": {
+        "file": "hexaeight-engine-linux-x64",
+        "sha256": "E78996947002255FC401E1D8A8E0B3E952836847B9DAA788558C5DE06665AA5E",
+        "protection": ""
+      },
+      "osx-arm64": {
+        "file": "hexaeight-engine-osx-arm64",
+        "sha256": "A6348458BD69B4809EA64EC70CDB0164660355065B8D6FD8F44BD0187243A758",
+        "protection": ""
+      }
+    }
+  },
+
+  "engine-mindmapchat": {
+    "repo": "HexaEightTeam/hbia-agent",
+    "tag": "v2026.08.18-r14",
+    "assets": {
+      "win-x64": {
+        "file": "hexaeight-harness-win-x64.exe",
+        "sha256": "1966A0EA9F2B142C357C77084C369D5FC43C58DF0FB5C74BB65E30AF7C3DEC20",
+        "protection": ""
+      },
+      "linux-x64": {
+        "file": "hexaeight-harness-linux-x64",
+        "sha256": "253792BA7C075D760E83887AA1599FA29CDAFC4DA0861694396C3B0671501BFF",
+        "protection": ""
+      },
+      "osx-arm64": {
+        "file": "hexaeight-harness-osx-arm64",
+        "sha256": "40441C20161D98D62331AD30ED82C8861AC2D163DC9F6EC5E812556147A92B4F",
         "protection": ""
       }
     }
