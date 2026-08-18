@@ -1,105 +1,3 @@
-<<<<<<< HEAD
-{
-    "_comment":  [
-                     "APPROVED BUILDS - which agent builds an identity accepts messages from.",
-                     "",
-                     "THIS LIST ONLY GROWS. Every release adds its PROTECTION HASH here, and older machines pull the",
-                     "file so they recognise builds published after they were installed. Without that, upgrading one",
-                     "agent silently breaks its peers: they refuse it, and the refusal looks like an intermittent",
-                     "network fault rather than a policy decision.",
-                     "",
-                     "Entries are never deleted - a build that must no longer be trusted gets allow:false, so the",
-                     "revocation itself propagates. Deleting a row would merely make older machines forget it was ever",
-                     "a build, and they would keep accepting it.",
-                     "",
-                     "Bump version whenever builds change; the tool reports it so an operator can see what they synced.",
-                     "A protection hash is MEASURED by running that build on that platform - see releases.json."
-                 ],
-    "version":  9,
-    "builds":  [
-                   {
-                       "hash":  "6EA5D05BE38262932A22810A132A88F54A54A460467ACF076C63620A6D3CE6BAB15EA52B62FBE0BE4C654014220AE8B94F5C7DE65D55E23CB1484ACCD37524FC",
-                       "label":  "hexaeight-agent 2026-08-05 win-x64 (Bridge 1.9.18 / ASK 1.9.161)",
-                       "allow":  true
-                   },
-                   {
-                       "hash":  "BD01C71973DBAC1D2B21B012E4AF16AF484293DB110B3DFDB861B4741C4D129677259375426A649731AEEF46984332D43338D59BD414CD0F8BB7CB74992D5040",
-                       "label":  "hexaeight-agent 2026-08-05 r2 win-x64 (Bridge 1.9.19 / ASK 1.9.161)",
-                       "allow":  true
-                   },
-                   {
-                       "hash":  "FE977C0076D06D756A66018244AD326EF1DFEF87721FCB4AD9CC992336B5180778926BFE99BC227D1A090595F3521089C94B30297FD76EB0217A0D163EBC30CF",
-                       "label":  "hexaeight-agent 2026-08-05 r3 win-x64 (Bridge 1.9.19 / ASK 1.9.161) Ã¢â‚¬â€ first enforcing build",
-                       "allow":  true
-                   },
-                   {
-                       "hash":  "1F0DFFD8859C18A0A272F5C6F656D35F0C0CEA4C12C5543E411F1579C9681CACB47D3A019F06C6183E9C9973486B49BEC19F8E3BDE54FE93B2D679F4EE3BECBF",
-                       "label":  "hexaeight-agent 2026-08-05 r4 win-x64 (Bridge 1.9.21 / ASK 1.9.161)",
-                       "allow":  true
-                   },
-                   {
-                       "hash":  "6230A870E4825659E3A011E7C4FD6ABD80D1BDEC966BBEBC076C519398F4E57F5DD7A54B6B4C0E70967713DDF0A417CCA877A24539E76D1330D5F2D9B9064CEB",
-                       "label":  "hexaeight-agent 2026-08-05 r5 win-x64 (Bridge 1.9.21 / ASK 1.9.161) Ã¢â‚¬â€ init-policy gates on origin",
-                       "allow":  true
-                   },
-                   {
-                       "hash":  "51652F55027CBB41779BA78317E28CBBC92D0ECFFEA049F3C8FB395E2B26EC48A5C3591453B14298D0E4789995C6C238B710D5C51B6AF6B586EB32523EF7ECD7",
-                       "label":  "hexaeight-agent 2026-08-05 r5 linux-x64 (Bridge 1.9.21 / ASK 1.9.161) Ã¢â‚¬â€ init-policy gates on origin",
-                       "allow":  true
-                   },
-                   {
-                       "hash":  "8FD1377D7A7A535FD1174F05084B28E81650A52FCFCE210245D3E97C4DCE8A6C12D48432B2E4F2A9E3CF21D961EB685C63433E9FD94CC29C93CD0A251A7F5343",
-                       "label":  "hexaeight-agent 2026-08-05 r5 osx-arm64 (Bridge 1.9.21 / ASK 1.9.161) Ã¢â‚¬â€ init-policy gates on origin",
-                       "allow":  true
-                   },
-                   {
-                       "hash":  "8CAA762C87A3AD486429B862A8E88B83F3E7DF1E41048DF0ACDF259C3664540A3F43EA3B982EE6495C5BADF1DC62C6C1B14A95B935A5D9D0AA89A0D4A99465B7",
-                       "label":  "hexaeight-agent 2026-08-13 r6 win-x64 Ã¢â‚¬â€ Response-shaped heia.fetch, binary bodies preserved",
-                       "allow":  true
-                   },
-                   {
-                       "hash":  "52BD317ECD7FBF15BA0432E8062C765E69DDB38ECFF39A9D937CF0E25A1A23CA2F380F69293C6AB55D15F5DD2EBEB4DBE69C7DD9E7ADD802BE6E13B7FA109663",
-                       "label":  "hexaeight-agent 2026-08-13 r6 linux-x64 Ã¢â‚¬â€ Response-shaped heia.fetch, binary bodies preserved",
-                       "allow":  true
-                   },
-                   {
-                       "hash":  "B48CEF0F3DFDB1705FFBA4DC133E4E6F80A7DB856D3D2FE8BAEBC26B09CC383EA348812BBE9DF4F4E720AC92C86D1D9C1213B39D53E454818886214D9FB7A9CB",
-                       "label":  "hexaeight-agent 2026-08-13 r6 osx-arm64 Ã¢â‚¬â€ measured on Apple Silicon",
-                       "allow":  true
-                   },
-                   {
-                       "hash":  "F427347D3F2CD3E8C282944AC5FE44289775F19522EF6830BE677AAD10101F270C20E17912F6C8057C1653A0C95B6E96D177E61B4A6E844D28F46784EC3DD9D9",
-                       "label":  "hexaeight-agent 2026-08-16 r9 win-x64 - ingest resolves its own transcript root; per-session working directories",
-                       "allow":  true
-                   },
-                   {
-                       "hash":  "ED5D03F656244661546F38261B5A28527265F7D594112D383A0962A2CF1B9309D9BC0C56EFCA89EBC1EAF1161DF9F8FC1C11FE46FCF690FB36C982F5F0DF3210",
-                       "label":  "hexaeight-agent 2026-08-16 r9 linux-x64 - ingest resolves its own transcript root; per-session working directories",
-                       "allow":  true
-                   },
-                   {
-                       "hash":  "A7A5DE8C4C7C78A79579840B00075E414AE8B61139810BB8833A5F3B8C12A9BA6B6587EC39B84303FBE509221C12C81F11E292C7175F88C70B53AFAAE751480C",
-                       "label":  "hexaeight-agent 2026-08-16 r9 osx-arm64 - measured on Apple Silicon (macOS 26.3.1)",
-                       "allow":  true
-                   },
-                   {
-                       "hash":  "B06389154F7CD2E5D93F63648F4EEFDA6F1F30668A00B69DEC0C7AA029C5F53D663E415403A06899563F6B9C03344F5EF6F42AF909899021F090321CA56A07A7",
-                       "label":  "hexaeight-agent 2026-08-16 r10 win-x64 - macOS turns run in the work directory, not the licence folder",
-                       "allow":  true
-                   },
-                   {
-                       "hash":  "B7DDDAEB86ACDF154573538F2683AD0E209617BBC4FB55480BD500CD59767961820936179CB59C94BFCFD3501AB05C94EDC9650488D7E9826A3E29C05AEF69EF",
-                       "label":  "hexaeight-agent 2026-08-16 r10 linux-x64 - macOS turns run in the work directory, not the licence folder",
-                       "allow":  true
-                   },
-                   {
-                       "hash":  "E1A9298559C8BF9309C48A54C74B417C346B59432BFC9DB1F8A3D7D11D64D49422D61CF0F9C3D1012FC0F389AD04840805F00799D98DBBBD9E6EE8C381B2A342",
-                       "label":  "hexaeight-agent 2026-08-16 r10 osx-arm64 - macOS turns run in the work directory, not the licence folder",
-                       "allow":  true
-                   }
-               ]
-}
-=======
 {
   "_comment": [
     "APPROVED BUILDS - which agent builds an identity accepts messages from.",
@@ -116,7 +14,7 @@
     "Bump version whenever builds change; the tool reports it so an operator can see what they synced.",
     "A protection hash is the SHA-512 of the extracted entry dll. It no longer requires a machine of that kind: the dll is embedded verbatim in the single-file bundle, so hashing the build's own intermediate dll gives the same value - verified on linux-x64 and confirmed on Apple Silicon for r14. See releases.json and ghreleasedocument.md."
   ],
-  "version": 7,
+  "version": 9,
   "builds": [
     {
       "hash": "6EA5D05BE38262932A22810A132A88F54A54A460467ACF076C63620A6D3CE6BAB15EA52B62FBE0BE4C654014220AE8B94F5C7DE65D55E23CB1484ACCD37524FC",
@@ -130,7 +28,7 @@
     },
     {
       "hash": "FE977C0076D06D756A66018244AD326EF1DFEF87721FCB4AD9CC992336B5180778926BFE99BC227D1A090595F3521089C94B30297FD76EB0217A0D163EBC30CF",
-      "label": "hexaeight-agent 2026-08-05 r3 win-x64 (Bridge 1.9.19 / ASK 1.9.161) — first enforcing build",
+      "label": "hexaeight-agent 2026-08-05 r3 win-x64 (Bridge 1.9.19 / ASK 1.9.161) Ã¢â‚¬â€ first enforcing build",
       "allow": true
     },
     {
@@ -140,32 +38,62 @@
     },
     {
       "hash": "6230A870E4825659E3A011E7C4FD6ABD80D1BDEC966BBEBC076C519398F4E57F5DD7A54B6B4C0E70967713DDF0A417CCA877A24539E76D1330D5F2D9B9064CEB",
-      "label": "hexaeight-agent 2026-08-05 r5 win-x64 (Bridge 1.9.21 / ASK 1.9.161) — init-policy gates on origin",
+      "label": "hexaeight-agent 2026-08-05 r5 win-x64 (Bridge 1.9.21 / ASK 1.9.161) Ã¢â‚¬â€ init-policy gates on origin",
       "allow": true
     },
     {
       "hash": "51652F55027CBB41779BA78317E28CBBC92D0ECFFEA049F3C8FB395E2B26EC48A5C3591453B14298D0E4789995C6C238B710D5C51B6AF6B586EB32523EF7ECD7",
-      "label": "hexaeight-agent 2026-08-05 r5 linux-x64 (Bridge 1.9.21 / ASK 1.9.161) — init-policy gates on origin",
+      "label": "hexaeight-agent 2026-08-05 r5 linux-x64 (Bridge 1.9.21 / ASK 1.9.161) Ã¢â‚¬â€ init-policy gates on origin",
       "allow": true
     },
     {
       "hash": "8FD1377D7A7A535FD1174F05084B28E81650A52FCFCE210245D3E97C4DCE8A6C12D48432B2E4F2A9E3CF21D961EB685C63433E9FD94CC29C93CD0A251A7F5343",
-      "label": "hexaeight-agent 2026-08-05 r5 osx-arm64 (Bridge 1.9.21 / ASK 1.9.161) — init-policy gates on origin",
+      "label": "hexaeight-agent 2026-08-05 r5 osx-arm64 (Bridge 1.9.21 / ASK 1.9.161) Ã¢â‚¬â€ init-policy gates on origin",
       "allow": true
     },
     {
       "hash": "8CAA762C87A3AD486429B862A8E88B83F3E7DF1E41048DF0ACDF259C3664540A3F43EA3B982EE6495C5BADF1DC62C6C1B14A95B935A5D9D0AA89A0D4A99465B7",
-      "label": "hexaeight-agent 2026-08-13 r6 win-x64 — Response-shaped heia.fetch, binary bodies preserved",
+      "label": "hexaeight-agent 2026-08-13 r6 win-x64 Ã¢â‚¬â€ Response-shaped heia.fetch, binary bodies preserved",
       "allow": true
     },
     {
       "hash": "52BD317ECD7FBF15BA0432E8062C765E69DDB38ECFF39A9D937CF0E25A1A23CA2F380F69293C6AB55D15F5DD2EBEB4DBE69C7DD9E7ADD802BE6E13B7FA109663",
-      "label": "hexaeight-agent 2026-08-13 r6 linux-x64 — Response-shaped heia.fetch, binary bodies preserved",
+      "label": "hexaeight-agent 2026-08-13 r6 linux-x64 Ã¢â‚¬â€ Response-shaped heia.fetch, binary bodies preserved",
       "allow": true
     },
     {
       "hash": "B48CEF0F3DFDB1705FFBA4DC133E4E6F80A7DB856D3D2FE8BAEBC26B09CC383EA348812BBE9DF4F4E720AC92C86D1D9C1213B39D53E454818886214D9FB7A9CB",
-      "label": "hexaeight-agent 2026-08-13 r6 osx-arm64 — measured on Apple Silicon",
+      "label": "hexaeight-agent 2026-08-13 r6 osx-arm64 Ã¢â‚¬â€ measured on Apple Silicon",
+      "allow": true
+    },
+    {
+      "hash": "F427347D3F2CD3E8C282944AC5FE44289775F19522EF6830BE677AAD10101F270C20E17912F6C8057C1653A0C95B6E96D177E61B4A6E844D28F46784EC3DD9D9",
+      "label": "hexaeight-agent 2026-08-16 r9 win-x64 - ingest resolves its own transcript root; per-session working directories",
+      "allow": true
+    },
+    {
+      "hash": "ED5D03F656244661546F38261B5A28527265F7D594112D383A0962A2CF1B9309D9BC0C56EFCA89EBC1EAF1161DF9F8FC1C11FE46FCF690FB36C982F5F0DF3210",
+      "label": "hexaeight-agent 2026-08-16 r9 linux-x64 - ingest resolves its own transcript root; per-session working directories",
+      "allow": true
+    },
+    {
+      "hash": "A7A5DE8C4C7C78A79579840B00075E414AE8B61139810BB8833A5F3B8C12A9BA6B6587EC39B84303FBE509221C12C81F11E292C7175F88C70B53AFAAE751480C",
+      "label": "hexaeight-agent 2026-08-16 r9 osx-arm64 - measured on Apple Silicon (macOS 26.3.1)",
+      "allow": true
+    },
+    {
+      "hash": "B06389154F7CD2E5D93F63648F4EEFDA6F1F30668A00B69DEC0C7AA029C5F53D663E415403A06899563F6B9C03344F5EF6F42AF909899021F090321CA56A07A7",
+      "label": "hexaeight-agent 2026-08-16 r10 win-x64 - macOS turns run in the work directory, not the licence folder",
+      "allow": true
+    },
+    {
+      "hash": "B7DDDAEB86ACDF154573538F2683AD0E209617BBC4FB55480BD500CD59767961820936179CB59C94BFCFD3501AB05C94EDC9650488D7E9826A3E29C05AEF69EF",
+      "label": "hexaeight-agent 2026-08-16 r10 linux-x64 - macOS turns run in the work directory, not the licence folder",
+      "allow": true
+    },
+    {
+      "hash": "E1A9298559C8BF9309C48A54C74B417C346B59432BFC9DB1F8A3D7D11D64D49422D61CF0F9C3D1012FC0F389AD04840805F00799D98DBBBD9E6EE8C381B2A342",
+      "label": "hexaeight-agent 2026-08-16 r10 osx-arm64 - macOS turns run in the work directory, not the licence folder",
       "allow": true
     },
     {
@@ -185,4 +113,3 @@
     }
   ]
 }
->>>>>>> a63a7ee (r14: engine hashes move into the manifest; protection hashes for all three RIDs)
