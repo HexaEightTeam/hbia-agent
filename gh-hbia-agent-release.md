@@ -118,30 +118,17 @@ row came from a different runtime/OS than the caller.
 | `win-x64` | published |
 | `linux-x64` | published |
 | `osx-arm64` | published |
-| `osx-x64` (Intel Mac) | **NOT published** — no Intel Mac available to capture on |
-| `linux-arm64` | **NOT published** — no arm64 Linux box available to capture on |
+| `osx-x64` (Intel Mac) | not built — add the RID to the build script when wanted |
+| `linux-arm64` | not built — add the RID to the build script when wanted |
 
-Both gaps are for the same reason, and neither can be closed from a machine we already have: the
-integrity hash is computed per *(assembly, runtime, OS)*, so it can only be produced by building and
-running **on the target architecture**. Cross-publishing does not generate it, and emulation attests
-a different build. `install-agent` therefore exits **2** on those platforms and points the user at
-support@hexaeight.com rather than installing a near-match that the platform would refuse anyway.
+**CORRECTED 2026-08-21.** These were previously described as blocked on hardware, because the
+protection hash was believed to require running the binary on the target architecture. It does not —
+see Step 4. The hash comes from the compiled dll, which the cross-compile produces on the build
+machine for any RID.
 
-### To close `linux-arm64`
-
-Any aarch64 Linux machine will do — a Raspberry Pi 4/5 on a **64-bit** OS (`uname -m` must report
-`aarch64`; 32-bit Raspberry Pi OS yields `linux-arm`, a different RID and useless here), a cloud
-arm64 VM (Oracle Ampere, AWS Graviton, Hetzner CAX), or an arm64 Linux container on Apple Silicon,
-which runs natively rather than emulated.
-
-Then follow steps 2–5 for that RID. Note before spending a licence: on macOS the harness printed all
-of its rows **while the licence call was failing**, because it computes them locally — so a capture
-may not need a fully working identity, only a machine that can run the binary. Worth confirming on
-the first arm64 box rather than assuming either way.
-
-Checked and ruled out: the `54.227.x.x` licence server is **x86_64**, not arm64.
-
----
+What genuinely needs the target platform is **platform blessing of the Bridge/ASK chain** (Step 2),
+and that is per-LIBRARY-VERSION, not per-build. With Bridge/ASK unchanged, adding a RID is a build
+script edit and nothing more.
 
 ## Step 3 — Build the agent, all platforms
 
@@ -164,26 +151,72 @@ RIDs: `win-x64`, `linux-x64`, `osx-arm64`.
 
 ## Step 4 — Measure the PROTECTION HASH, per platform
 
-Run each binary once so it extracts, then hash the extracted **entry dll**:
+**NO TARGET MACHINE IS NEEDED. Hash the compiled dll in `obj/`, not the extracted one.**
 
-```powershell
-.\hexaeight-agent.exe --probe                       # exit 0 = blessed, 2 = not
-$d = Get-ChildItem "$env:LOCALAPPDATA\Temp\.net\hexaeight-agent" -Directory |
-     Sort-Object LastWriteTime -Descending | Select-Object -First 1
-(Get-FileHash (Join-Path $d.FullName 'hexaeight-agent.dll') -Algorithm SHA512).Hash
-```
+The protection hash is SHA-512 of the entry dll. `PublishSingleFile` embeds that dll **unchanged**,
+so the copy sitting in the build output is byte-identical to the one a running binary extracts:
 
 ```bash
-./hexaeight-agent --probe ; echo $?                  # Linux: ~/.net/... macOS: ~/.net/...
-shasum -a 512 ~/.net/hexaeight-agent/*/hexaeight-agent.dll | cut -c1-128 | tr 'a-f' 'A-F'
+O=HexaEight.Agent/obj/Release/net8.0
+for rid in linux-x64 osx-arm64 win-x64; do
+  printf "  %-10s " "$rid"
+  shasum -a 512 "$O/$rid/hexaeight-agent.dll" | cut -c1-128 | tr 'a-f' 'A-F'
+done
 ```
 
-`--probe` caches its verdict for 60s in `.probe.state`; delete it when retrying.
+**PROVEN, 2026-08-21.** The linux-x64 hash was measured both ways — extracted at runtime from
+`~/.net/hexaeight-agent/<dir>/`, and read straight from `obj/` — and the two are identical:
 
-**`--probe` must return 0 on every platform before you go further.** A 2 means the platform does not
-trust that build — usually a missing self-contained row from step 2.
+```
+8E5F401B0E917ECA0F6BFF97F292D70581D288F8F35A19BFD88183B9E00C3ACB98DEA68725AB5EB2977C97877A5CF8379DE4F97D0991A7B91CF2421E7D7D4422
+```
 
----
+The win-x64 hash was likewise confirmed against a real extraction on Windows.
+
+**Consequence: macOS is a first-class RID with no Apple hardware.** The IL is produced by the
+cross-compile, so its hash is available on the build machine. A Mac is needed ONLY for platform
+blessing of the Bridge/ASK chain, which is per-LIBRARY-VERSION — while Bridge/ASK stay put, no
+release is ever blocked on a Mac. The same argument closes `linux-arm64`: the obj dll exists for any
+RID `dotnet publish` accepts.
+
+### The old method, and why it is now only a cross-check
+
+Running `--probe` and hashing `~/.net/<exe-name>/<dir>/hexaeight-agent.dll` still works and is worth
+doing once per release as an independent confirmation. It has two traps the obj method does not:
+
+- **`--probe` must run FROM AN IDENTITY FOLDER** (`env-file` + `hexaeight.mac`). Elsewhere it returns
+  **2**, which reads exactly like "the platform does not trust this build" and is not. That cost time
+  on 2026-08-21 before the cause was spotted.
+- **The extraction cache is keyed on the EXECUTABLE FILENAME**, and every release ships the same
+  name, so the directory accumulates one entry per release. `rm -rf ~/.net/<exe-name>` first, or you
+  may hash an older build and publish a hash that gates nothing.
+
+The exit code does not matter when you only want the hash: extraction happens before the licence
+call, so the dll is on disk even when the probe fails (134/SIGABRT on macOS without an identity,
+2 elsewhere).
+
+**`--probe` = 0 is still the gate for shipping.** Run it once, from an identity folder, on the
+platform you have. It proves the platform trusts the build; the obj hash only tells you which build
+it is.
+
+### Worked example — 2026-08-21, agent-source-only release
+
+Changed: `ExternalHost.cs`, `Program.cs`, `AskAgent.cs`, new `VouchStore.cs`. No Bridge, no router,
+no library version change — so Steps 1 and 2 were skipped entirely, per Step 0.
+
+```
+PROTECTION HASH (SHA-512, entry dll — goes in ApprovedBuilds)
+  linux-x64   8E5F401B0E917ECA0F6BFF97F292D70581D288F8F35A19BFD88183B9E00C3ACB98DEA68725AB5EB2977C97877A5CF8379DE4F97D0991A7B91CF2421E7D7D4422
+  osx-arm64   F66B6A2DCF8CE9F2B214B18A3E21D9615878EEE2007FFD22F4B33165B4F6A95AF8F9439AA7472EFD276DBB089056DCB07E829589D68BA055C0611CFDB8A876D7
+  win-x64     3CDBAE777CE267078E2669FFED314CDCBBAC0E0935267838A6164C3CDDF69DC8FE58AC3265F7D6E18EA07282AB2A2C14B15889B46FAED6830E8480667DA2AA03
+
+SHA-256 (download verification — never appears in an allowlist)
+  linux-x64   1A9D7DBAFB04EE02FC03BD5290EAE049847D7FC634FD92886335AC6CE1368D93
+  osx-arm64   DFE47B72BA8139329A5941CD735439F4AE7CB7D7F1CB709A2FA2084DAEB34BA8
+  win-x64.exe 12F49F9FAF299E2BF6266C6C5A41DCFF118D7AF495103E3FF7ECB4E605290146
+```
+
+`--probe` on linux-x64, run from `~/hbia-agent04`, returned **0**.
 
 ## Step 5 — Add the hashes to HexaEight.Activate
 
@@ -209,12 +242,16 @@ hash** — a stale build is easy to produce and impossible to spot afterwards:
 
 Binaries do not belong in git. They are release **assets**; the repo holds docs and process only.
 
+Asset paths are wherever `buildagent-release.sh` wrote them — **`dist/release/agent/`**. This doc
+said `dist/release/bin/` until 2026-08-21; following it literally fails at the very last step,
+after every other part of the release is already done.
+
 ```bash
 gh release create <tag> \
-  dist/release/bin/hexaeight-agent-win-x64.exe \
-  dist/release/bin/hexaeight-agent-linux-x64 \
-  dist/release/bin/hexaeight-agent-osx-arm64 \
-  dist/release/HASHES.md \
+  dist/release/agent/hexaeight-agent-win-x64.exe \
+  dist/release/agent/hexaeight-agent-linux-x64 \
+  dist/release/agent/hexaeight-agent-osx-arm64 \
+  dist/release/agent/HASHES.md \
   --title "<title>" --notes-file notes.md
 ```
 
@@ -266,6 +303,9 @@ A **404** or a JSON parse error in the log is not a refusal. 404 means the route
 | symptom | cause |
 |---|---|
 | `--probe` = 2, but `verify-libs` says every assembly matches nuget | self-contained runtime rows missing from `assemblyintegrity.txt` |
+| `--probe` = 2 and you are NOT in an identity folder | that is the cause. `--probe` needs `env-file` + `hexaeight.mac` in the CWD; it returns 2 anywhere else and reads exactly like distrust |
+| Protection hash does not match what a peer expects | hashed the wrong extraction dir. The cache is keyed on the EXE FILENAME and every release shares it — `rm -rf ~/.net/<exe-name>` first, or hash `obj/Release/net8.0/<rid>/hexaeight-agent.dll` instead |
+| A release "needs a Mac" | it does not — see Step 4. Only Bridge/ASK blessing does, and that is per-library-version |
 | `marker=DECOY` after deploying rows | platform not restarted, or the row came from a different runtime/OS |
 | `KGT: 0` / `FAILED: -6` | ran outside the identity folder, or ASK's own rows are not registered |
 | Agent refuses everyone after `--tighten` | gate matching on an empty field — fixed in Bridge 1.9.20; before that, unwinnable |
@@ -282,15 +322,16 @@ every decrypt returns an empty string with no exception. Always reference the pu
 
 Tracked here because it is release-shaped: each item ends in something published.
 
-### 1. `linux-arm64` — blocked on hardware
+### 1. `linux-arm64` and Intel Mac (`osx-x64`) — NOT blocked any more
 
-See *Platform coverage* above. Needs an aarch64 Linux box; everything else is written down.
+Both were listed here as blocked on hardware. They are not: Step 4 shows the protection hash comes
+from the compiled dll, which the cross-compile produces for any RID. Adding either is a one-line edit
+to the RID loop in `buildagent-release.sh` plus an `ApprovedBuilds` entry.
 
-### 2. Intel Mac (`osx-x64`) — blocked on hardware
+The only remaining per-platform requirement is Bridge/ASK blessing (Step 2), which is per-library-
+version. While those stay put, a new RID needs no machine of that architecture.
 
-Same shape. Until then, `install-agent` exits 2 and directs the user to support.
-
-### 3. Working examples
+### 2. Working examples
 
 The agent is proven at the protocol level — an unapproved build is refused, an approved one is
 admitted, hot reload works without a restart. What does not yet exist is a customer walking from
@@ -306,7 +347,7 @@ Needed:
 - An engine configuration that a reader can copy — the config on the WSL box has thirty engines and
   is a poor first example.
 
-### 4. Website deployment documentation
+### 3. Website deployment documentation
 
 The gap a paying customer hits first. From a purchased licence to a running agent:
 
