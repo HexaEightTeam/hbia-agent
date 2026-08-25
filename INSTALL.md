@@ -557,6 +557,14 @@ hexaeight-activate engine --auto
 | `harness` | a drop-in for `claude -p` — same flags, same stream-json frames |
 | `mindmapchat` | the same loop plus the fact ledger, captured procedures and the mind map |
 
+**The `harness` engine is sealed with `--memory 24 --memory-write` automatically** (so is any `chat`
+engine, which shares the `hexaeight-engine` binary). `--memory 24` keeps the last 24 turns verbatim and
+folds older ones into searchable summaries, so a long session stays affordable; `--memory-write` turns
+on `memory_add` / `memory_refresh` / `memory_forget`, letting a session build named, cross-session
+memory books. `claude` (the real CLI) and `mindmapchat` (a different binary) do not take these flags and
+are left untouched. No action is needed — this is the default; it is noted only so the extra flags on the
+sealed `harness` definition are expected, not a surprise.
+
 It asks **three** things, once, and applies them to all three engines:
 
 | asked | answer |
