@@ -35,7 +35,7 @@ anything else. Find them before removing anything:
 
 ```bash
 # running components, and where they run FROM
-for p in 5100 8770 5620 8899 8902 8903 8904 8907 1880; do
+for p in 5100 8770 5620 8899 8902 8903 8904 8907 1880 5623 5624; do
   pid=$(lsof -nP -tiTCP:$p -sTCP:LISTEN 2>/dev/null | head -1)
   [ -n "$pid" ] && printf '  %-5s pid=%-7s %s\n' "$p" "$pid" "$(ps -p $pid -o comm= 2>/dev/null)"
 done
@@ -62,7 +62,7 @@ hexaeight-activate stop all          # workspace, agent, router
 appears to still be running:
 
 ```bash
-for p in 5100 8770 5620 8899 8902 8903 8904 8907 1880; do
+for p in 5100 8770 5620 8899 8902 8903 8904 8907 1880 5623 5624; do
   (echo > /dev/tcp/127.0.0.1/$p) 2>/dev/null && echo "  $p STILL UP" || echo "  $p free"
 done
 ```
@@ -71,12 +71,12 @@ Anything still up, stop by **port**, never by name — the agent runs as `./hexa
 relative path that most `pkill` patterns miss:
 
 ```bash
-for p in 5100 8770 5620 8899 8902 8903 8904 8907 1880; do
+for p in 5100 8770 5620 8899 8902 8903 8904 8907 1880 5623 5624; do
   for pid in $(lsof -nP -tiTCP:$p -sTCP:LISTEN 2>/dev/null); do kill "$pid"; done
 done
 sleep 5
 # still there? then, and only then:
-for p in 5100 8770 5620 8899 8902 8903 8904 8907 1880; do
+for p in 5100 8770 5620 8899 8902 8903 8904 8907 1880 5623 5624; do
   for pid in $(lsof -nP -tiTCP:$p -sTCP:LISTEN 2>/dev/null); do kill -9 "$pid"; done
 done
 ```

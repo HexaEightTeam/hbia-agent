@@ -125,6 +125,26 @@ binary that is running, measured rather than guessed. If it cannot measure the h
 gate **open** and says so, rather than tightening on a value it is unsure of and locking you out of
 your own agent.
 
+## The workspace and its side services
+
+`hexaeight-activate install-workspace` installs the browser UI. As of this release the workspace
+bundle also carries two **side services** the agent supervises:
+
+- **browser service** (`:5623`) — the remote-browser pane, so a session can drive a live browser;
+- **memory service** (`:5624`) — the document-memory pane.
+
+They are laid down with the UI and registered in the agent config automatically; the agent starts
+them like it starts Node-RED. The browser service needs `puppeteer`, which `install-runtime`
+installs (its first run downloads a headless Chromium). One command checks them all and starts any
+that is down:
+
+```bash
+hexaeight-activate checkservices
+```
+
+To restart just one without bouncing the agent: `hexaeight-activate restart browser` (or `memory`).
+See **UPGRADE.md** for moving an existing machine onto this release.
+
 ## Platform coverage
 
 | platform | status |

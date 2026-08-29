@@ -781,23 +781,44 @@ cd ~/hbia-workspace
 hexaeight-activate install-workspace --agent <agent identity name from step 1>
 ```
 
-**Check:** it reports `browser auth … MB` (the WASM runtime) and writes a deployment config naming
-your agent.
+**Check:** it reports `browser auth … MB` (the WASM runtime), `browser service present`, `memory
+service present`, registers those two services in `hexaeight-agent.json`, and writes a deployment
+config naming your agent.
+
+**The workspace now bundles two side services.** As of this release the zip also carries the
+**browser service** (`:5623`, the remote-browser pane) and the **memory service** (`:5624`, the
+document-memory pane). `install-workspace` lays them down under `~/.heia/runtime/workspace/` and
+writes `services.browser` / `services.memory` into the agent config, so the agent supervises them the
+same way it does Node-RED. They need `puppeteer` in the runtime — `install-runtime` installs it
+(pinned 25.9.0), and its first run downloads a headless Chromium (a few hundred MB), so a fresh
+install is larger than before.
 
 **Check the bundle is new enough to KNOW your engines.** The rail can only list an engine whose name
-is compiled into the bundle. An older bundle omits `harness` and `mindmapchat` entirely, so they are
-sealed, served, and simply never appear — with nothing on screen to say why:
+is compiled into the bundle. An older bundle omits engines entirely, so they are sealed, served, and
+simply never appear — with nothing on screen to say why:
 
 ```bash
 cd ~/.heia/runtime/workspace
-for e in claude harness mindmapchat; do
+for e in claude harness mindmapchat chat mission prepare; do
   printf '  %-12s %s\n' "$e" "$(grep -rlo "$e" assets/*.js 2>/dev/null | wc -l) asset file(s)"
 done
 ```
 
-Each must be **1 or more**. A `0` for `harness` or `mindmapchat` means the deployed bundle predates
-them — re-run `hexaeight-activate install-workspace` to fetch the current one, and if it still shows
-`0`, the machine is pinned to an old release rather than misconfigured.
+Each must be **1 or more**. A `0` for `chat`, `mission` or `prepare` means the deployed bundle
+predates them — re-run `hexaeight-activate install-workspace` to fetch the current one, and if it
+still shows `0`, the machine is pinned to an old release rather than misconfigured.
+
+**Confirm the services are up** (after the agent has started, §4). One command checks all of them and
+starts any that is down, without disturbing anything already running:
+
+```bash
+cd ~/hbia-agent          # the identity folder, where hexaeight-agent.json lives
+hexaeight-activate checkservices
+```
+
+It should report `agent UP`, `node-red UP`, `browser UP`, `memory UP`. A service shown `DOWN` is
+started in place. To bounce just one without restarting the agent: `hexaeight-activate restart
+browser` (or `memory`).
 
 Serve it:
 
