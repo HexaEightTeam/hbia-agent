@@ -50,7 +50,7 @@ will re-point them at the new locations in Step 6 (or let the agent manage them 
 dotnet tool update --global HexaEight.Activate
 ```
 
-This release requires **HexaEight.Activate 1.0.43 or later**.
+This release requires **HexaEight.Activate 1.0.45 or later**.
 
 ## Step 3 — Update the runtime
 
@@ -77,6 +77,17 @@ it replaces the existing one.
 
 ## Step 5 — Update the workspace
 
+> **Back up your deployment config first.** `install-workspace --force` replaces the whole workspace
+> directory, and your `config.js` (the file that points the workspace at its agent) is replaced with
+> the bundle's default. Copy it aside before upgrading and restore it afterwards:
+>
+> ```bash
+> cp ~/.heia/runtime/workspace/config.js ~/config.js.keep      # before Step 5
+> ```
+>
+> See **[The workspace deployment config](#the-workspace-deployment-config-configjs)** below for what
+> each field means and the settings for a local vs. remote deployment.
+
 Run this from your **agent identity folder**, so the new services are registered with the agent:
 
 ```bash
@@ -85,6 +96,12 @@ hexaeight-activate install-workspace --force --agent <your-agent-name>
 
 This installs the updated interface together with the browser and memory services, and registers both
 with the agent. It confirms what was registered on completion.
+
+Then restore your deployment config (or set it as described in the section below):
+
+```bash
+cp ~/config.js.keep ~/.heia/runtime/workspace/config.js       # after Step 5
+```
 
 Then apply the current engine configuration:
 
@@ -145,6 +162,62 @@ Finally, confirm in the browser: open the workspace, ask a question in a chat, t
 
 ---
 
+## The workspace deployment config (config.js)
+
+`~/.heia/runtime/workspace/config.js` tells the workspace **which agent to sign in to and how to
+reach it**. It is *deployment state*, not part of the bundle — plain JavaScript, read by the browser
+before the app starts, and served to every browser that loads the workspace (so it holds **names and
+URLs only, never a key**).
+
+> **It is replaced on every `install-workspace --force`.** The upgrade swaps the whole workspace
+> directory, so a customised `config.js` is lost unless you copy it aside first (Step 5). If you did
+> not, re-create it from the fields below — this is the only file you need to restore by hand.
+
+`serve.mjs` reads it fresh on each request, so after editing it a **hard refresh** in the browser
+(Ctrl/Cmd-Shift-R) is enough — no server restart.
+
+### The fields
+
+```js
+window.__HEIA_CONFIG = {
+  agent:          '…',      // which agent the workspace signs in to
+  localWorkspace: false,    // is the browser on the agent's own machine?
+  localAgentPort: 8770,     // the agent's port on this machine
+  agentLocalUrl:  '',       // an explicit browser->agent URL that overrides the composed one
+};
+```
+
+| field | meaning |
+|---|---|
+| `agent` | The agent the workspace signs in to. For a **local** deployment set it to the agent's own URL, `http://localhost:8770`. For a **remote/named** deployment set it to the agent's registered name (e.g. `guardian.example.com`), or leave it `''` to have sign-in ask for it. |
+| `localWorkspace` | `false` — the workspace reaches the agent at the URL/name in `agent`. `true` — an all-in-one shortcut where sign-in asks only for an email and talks straight to `http://localhost:<localAgentPort>`. `null` keeps the built-in default. |
+| `localAgentPort` | The agent's port on this machine (default `8770`). Set it to `8770` for a local deployment; leave `null` for a remote one. |
+| `agentLocalUrl` | An explicit `http://host:port` that overrides the composed local URL. Leave `''` in almost all cases — it is only for a broken Windows→WSL `localhost` forward. |
+
+### Correct settings
+
+**Workspace deployed locally (agent on the same machine):**
+
+```js
+window.__HEIA_CONFIG = {
+  agent:          'http://localhost:8770',
+  localWorkspace: false,
+  localAgentPort: 8770,
+  agentLocalUrl:  '',
+};
+```
+
+**Workspace deployed remotely (agent reached by name via the registry):**
+
+```js
+window.__HEIA_CONFIG = {
+  agent:          '',        // or the agent's registered name
+  localWorkspace: false,
+  localAgentPort: null,
+  agentLocalUrl:  '',
+};
+```
+
 ## Managing the services
 
 | Task | Command |
@@ -168,3 +241,5 @@ so an earlier agent simply ignores service entries it does not recognise.
 | A service shows `DOWN` in `checkservices` | It is started in place. If it still fails, check its entry under `services.<name>` in `hexaeight-agent.json`. |
 | Ports 5623/5624 already in use before upgrade | An older copy started by your own automation is still running. Stop it (Step 1) and re-run the upgrade. |
 | macOS agent exits immediately (`Killed: 9`) | The binary needs re-signing — see the note in Step 4. |
+| Sign-in does not show the agent, or cannot reach it after upgrade | `config.js` was replaced by the upgrade. Restore it, or set it per [The workspace deployment config](#the-workspace-deployment-config-configjs), then hard-refresh the browser. |
+| Sign-in asks only for an email (no agent name/URL) | `localWorkspace` is `true`. That is the all-in-one local shortcut. For a named/remote agent set it to `false`. |
