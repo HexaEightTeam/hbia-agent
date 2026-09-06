@@ -9,13 +9,18 @@ and **memory** services. For a first-time installation, see [INSTALL.md](INSTALL
 
 ## What this release adds
 
-- **Browser pane** — a live, agent-driven browser in the workspace, served by a new *browser
-  service* on port `5623`.
-- **Memory pane** — browse, add and search document memories, served by a new *memory service* on
-  port `5624`.
+- **Missions** — a dedicated Missions view: list your ingested missions, examine each one's cards and
+  flowchart, run it, open it to edit, and export/import a mission (with its skills) as a single bundle.
+- **Mission-runner engine** — `runmission` is now a default engine, and several model-pinned variants
+  can be sealed so one mission is offered on a choice of models (see Step 5).
+- **Per-session cost** — a Calculate-cost control on mission-runner sessions that prices a session's
+  usage and breaks it down per question.
+- **Improved document ingestion** in the harness engine (structural chunking with a coverage guard),
+  and a rewritten Home onboarding.
 
-Both services are installed with the workspace and are supervised by the agent, alongside Node-RED.
-The browser service uses Chromium, which the runtime installer now provides.
+The agent, the second engine binary and the router are carried forward unchanged. The browser (`5623`)
+and memory (`5624`) services from the previous release continue to be installed with the workspace and
+supervised by the agent.
 
 ---
 
@@ -108,6 +113,32 @@ Then apply the current engine configuration:
 ```bash
 hexaeight-activate engine --validate
 ```
+
+`engine --validate` re-seals engines whose priming has changed and adds any missing default engine
+(reusing an existing engine's route), so an upgrade brings the sealed set up to date without re-asking
+for a route or model.
+
+**The default engine set this release seals:** `claude`, `harness`, `chat`, `coding`, `mission`,
+`prepare`, and `runmission` (the mission-runner). `mindmapchat` is no longer part of the default set —
+if it was sealed on a previous install it is left in place (upgrade does not remove it); to drop it,
+see UNINSTALL. The engine binaries themselves (`hexaeight-engine`, `hexaeight-harness`) are updated by
+`install-agent` in Step 4 regardless.
+
+### Running a mission on several models (optional)
+
+To offer a mission on more than one model, seal one `runmission` variant per model — run this once per
+model, from your agent identity folder:
+
+```bash
+hexaeight-activate engine --add runmission \
+  --model "<route>|<provider-model-id>" \
+  --name  runmission-<label> \
+  --router "<your-agent-name>|http://127.0.0.1:5100"
+```
+
+The route must be anthropic-shaped (the same rule as the default engines). The workspace groups every
+`runmission*` engine under one **MissionRun** entry with a model picker, so the variants show as a single
+item with a choice of model. Restart the agent after adding them.
 
 ## Step 6 — Restore automatic startup
 

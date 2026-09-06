@@ -48,9 +48,9 @@ step does not do what this table says.
 | — | `hexaeight-activate newtoken` | the licence. **Human only** |
 | 2 | `dotnet tool install/update --global HexaEight.Activate` | the tool, **1.0.32+** |
 | 3 | `hexaeight-activate install-router` → `upstreams` → `models` | the router, a provider key, and the model list to show the human |
-| 4 | `hexaeight-activate install-agent` | the agent, the pinned toolchain, and the `harness` + `mindmapchat` engines |
+| 4 | `hexaeight-activate install-agent` | the agent, the pinned toolchain, and the `hexaeight-engine` engine binary |
 | 4 | `hexaeight-activate sandbox` | proof turns can be confined. **Do not start the agent if this says INSTALLED BUT CANNOT RUN** |
-| 5 | `hexaeight-activate engine --auto` | all three engines sealed against the router, in one pass |
+| 5 | `hexaeight-activate engine --auto` | the default engines (claude, harness, chat, coding, mission, prepare, runmission) sealed against the router, in one pass |
 | 6 | `hexaeight-activate install-workspace` | the browser UI on 5620 |
 | 7 | ask it a question in the browser | proof it works end to end |
 | 7b | `hexaeight-activate autostart on` | it all comes back after a reboot. **Without this, nothing does** |
@@ -553,19 +553,25 @@ hexaeight-activate engine --auto
 
 | engine | what it is |
 |---|---|
-| `claude` | the pinned Claude Code CLI |
-| `harness` | a drop-in for `claude -p` — same flags, same stream-json frames |
-| `mindmapchat` | the same loop plus the fact ledger, captured procedures and the mind map |
+| `claude` | the pinned Claude Code CLI (kept for a plain Claude session; not needed to build an app) |
+| `harness` | a drop-in for `claude -p` — same flags, same stream-json frames; the engine you build with |
+| `chat` | the plain conversational engine (prepare documents for a memory) |
+| `coding` | a coding session over one real codebase |
+| `mission` | mission authoring — describe an app and it draws the flowchart of cards |
+| `prepare` | plan-mode conversational engine |
+| `runmission` | the mission-runner — runs an ingested mission (see "Running a mission on several models" below) |
 
-**The `harness` engine is sealed with `--memory 24 --memory-write` automatically** (so is any `chat`
-engine, which shares the `hexaeight-engine` binary). `--memory 24` keeps the last 24 turns verbatim and
-folds older ones into searchable summaries, so a long session stays affordable; `--memory-write` turns
-on `memory_add` / `memory_refresh` / `memory_forget`, letting a session build named, cross-session
-memory books. `claude` (the real CLI) and `mindmapchat` (a different binary) do not take these flags and
-are left untouched. No action is needed — this is the default; it is noted only so the extra flags on the
-sealed `harness` definition are expected, not a surprise.
+`claude`, `harness`, `chat`, `coding`, `mission`, `prepare` and `runmission` are the default set as of
+this release. (`mindmapchat` — a second .NET binary — is no longer sealed by default; it remains in the
+product but is not part of the build-an-app flow.)
 
-It asks **three** things, once, and applies them to all three engines:
+**The harness-family engines are sealed with `--memory 24 --memory-write` automatically** (`harness`,
+`chat`, `coding`, `mission`, `prepare`, `runmission` all share the `hexaeight-engine` binary). `--memory
+24` keeps the last 24 turns verbatim and folds older ones into searchable summaries; `--memory-write`
+turns on `memory_add` / `memory_refresh` / `memory_forget`. `claude` (the real CLI) does not take these
+flags and is left untouched. No action is needed — noted only so the extra flags are expected.
+
+It asks **three** things, once, and applies them to every default engine:
 
 | asked | answer |
 |---|---|
@@ -741,15 +747,33 @@ on their own, and their personal `claude` will look broken until they do.
 
 Do not argue the point, and do not quietly edit the file anyway.
 
+### Running a mission on several models
+
+A mission is run by the `runmission` engine. To offer the SAME mission on more than one model — so the
+person can pick which model answers — seal one `runmission` variant per model. Each variant is the same
+mission-runner pinned to a different route/model; run this once per model:
+
+```bash
+cd ~/hbia-agent
+hexaeight-activate engine --add runmission \
+  --model "<route>|<provider-model-id>" \
+  --name  runmission-<label> \
+  --router "<router identity name>|http://127.0.0.1:5100"
+```
+
+`--name` gives the variant a stable label (use the `runmission-<label>` form, e.g. one per model). The
+route must be anthropic-shaped, the same rule as the default engines. Restart the agent afterwards.
+The workspace groups every `runmission*` engine under one **MissionRun** entry with a model picker, so
+these variants appear as one item with a choice of model — not as several separate engines.
+
 ### Adding another engine later
 
-`engine --auto` only ever handles the three standard ones, and re-running it is safe — it re-seals
-them in place.
+`engine --auto` handles the default set, and re-running it is safe — it re-seals them in place.
 
-**Those three are the whole set this install provides. Do not add others uninvited.** Codex, grok,
-llxprt and the framework engines are **not shipped and not installed** — HBIA does not put them on
-the machine and there is nothing to point an engine at. If the human has installed one themselves
-and asks for it, wire it up; otherwise finish with the three and say so.
+**That set is what this install provides. Do not add others uninvited.** Codex, grok, llxprt and the
+framework engines are **not shipped and not installed** — HBIA does not put them on the machine. If the
+human has installed one themselves and asks for it, wire it up; otherwise finish with the default set
+and say so.
 
 For such an engine, use the interactive form, one at a time:
 
@@ -799,12 +823,12 @@ simply never appear — with nothing on screen to say why:
 
 ```bash
 cd ~/.heia/runtime/workspace
-for e in claude harness mindmapchat chat mission prepare; do
+for e in claude harness chat coding mission prepare runmission; do
   printf '  %-12s %s\n' "$e" "$(grep -rlo "$e" assets/*.js 2>/dev/null | wc -l) asset file(s)"
 done
 ```
 
-Each must be **1 or more**. A `0` for `chat`, `mission` or `prepare` means the deployed bundle
+Each must be **1 or more**. A `0` for `coding`, `mission` or `runmission` means the deployed bundle
 predates them — re-run `hexaeight-activate install-workspace` to fetch the current one, and if it
 still shows `0`, the machine is pinned to an old release rather than misconfigured.
 
@@ -896,6 +920,30 @@ If they have no host and no preference, the tunnel in step 6b is the quickest th
 offer that instead of leaving them stuck.
 
 Upgrading later means copying a newer bundle and keeping their `config.js`.
+
+---
+
+## 7. Moving a mission (and its skills) between machines
+
+A mission can be carried to another HBIA agent as a single file. In the workspace, open the **Missions**
+section, select the mission, and choose **Export** — it produces a `.zip` holding the mission's flowchart,
+its procedure cards, and the skills those cards use. On the other machine, use **Import** in the same
+section to restore it; the imported mission then opens there as an editable session, and skill references
+carry over unchanged.
+
+Secret **values** are never included — only their names. After an import, the operator supplies the named
+keys on the target with the normal secret flow; the import result lists which are needed.
+
+The UI export bundles the mission and its skills. To also include the mission's **data-memory corpora** in
+the same file — which can be large — use the command-line form, which has no browser size limit:
+
+```bash
+hexaeight-activate agskill-export --mission <name> --out mission.zip   # mission + skills (+ data with no --no-data)
+hexaeight-activate agskill-import --zip mission.zip                    # restore on the target
+```
+
+In the UI a mission appears only in the **Missions** section and a document memory only in the **Memory**
+pane — a mission is an app, a memory is knowledge it reads.
 
 ---
 
@@ -1115,8 +1163,9 @@ account) or a real DNS name plus a certificate, and set `reach` to
 
 Open the workspace, sign in with the agent name and the human's email, and send one message.
 
-**The rail lists only engines this agent actually serves.** You should see `claude`, `harness` and
-`mindmapchat`. An engine missing here was not sealed in step 5 — go back and check its row rather
+**The rail lists only engines this agent actually serves.** You should see the default set — `claude`,
+`harness`, `chat`, `coding`, `mission`, `prepare` and `runmission` (grouped, with `runmission` under a
+"MissionRun" entry). An engine missing here was not sealed in step 5 — go back and check its row rather
 than looking for a UI fault. An engine you never configured is *supposed* to be absent.
 
 ```bash
