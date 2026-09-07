@@ -118,27 +118,61 @@ hexaeight-activate engine --validate
 (reusing an existing engine's route), so an upgrade brings the sealed set up to date without re-asking
 for a route or model.
 
-**The default engine set this release seals:** `claude`, `harness`, `chat`, `coding`, `mission`,
-`prepare`, and `runmission` (the mission-runner). `mindmapchat` is no longer part of the default set —
-if it was sealed on a previous install it is left in place (upgrade does not remove it); to drop it,
-see UNINSTALL. The engine binaries themselves (`hexaeight-engine`, `hexaeight-harness`) are updated by
-`install-agent` in Step 4 regardless.
+**The engines to keep are exactly:** `claude`, `harness`, `chat`, `coding`, `mission`, and `runmission`
+(the mission-runner). Do **not** seal `prepare` unless the operator specifically asks for it.
+
+To see what is currently sealed, inspect the engine names in `hexaeight-agent.json` (there is no
+`engine --list` command). An older install may still carry engines that are no longer in the default
+set — most commonly `mindmapchat`. **There is no self-service `engine --remove`:** the engine store is
+sealed under the agent identity, and the shipped tooling only adds or re-seals, it does not delete. A
+leftover engine that is not in the keep-set does no harm — it simply is not offered as a default. Leave
+it in place; do not attempt to remove it with an invented command.
+
+Then restart the agent so it re-reads the engine set. The engine binary itself —
+`hexaeight-engine` in `~/.heia/runtime/harness/`, which backs `harness`, `chat`, `mission`,
+`runmission` and `coding` — is updated by `install-agent` in Step 4 regardless.
+
+Finally, make the workspace aware of the sealed engines. Sealing an engine makes it *work*, but the
+workspace reads its engine list from `config.js`; a newly-sealed engine does not appear in the rail
+until you sync it:
+
+```bash
+hexaeight-activate engines-sync
+```
+
+This writes each sealed engine into `config.js` as `window.__HEIA_CONFIG.engines`, leaving existing
+entries untouched. After it runs, **hard-refresh** the browser (Ctrl/Cmd-Shift-R) so the workspace
+picks up the new list. Re-run `engines-sync` any time you add or re-seal an engine (including the
+MissionRun variants below) — without it the engine is sealed and reachable but never shows in the UI.
 
 ### Running a mission on several models (optional)
 
-To offer a mission on more than one model, seal one `runmission` variant per model — run this once per
-model, from your agent identity folder:
+To offer a mission on more than one model, seal one variant per model — run this once per model, from
+your agent identity folder. The base engine passed to `--add` is `runmission`; the `--name` you give
+the variant **must be one of the names the workspace already groups under MissionRun** (below), or it
+seals correctly but shows as its own separate rail item instead of appearing in the MissionRun model
+picker.
 
 ```bash
 hexaeight-activate engine --add runmission \
-  --model "<route>|<provider-model-id>" \
-  --name  runmission-<label> \
+  --model  "<route>|<provider-model-id>" \
+  --name   <recognized-name> \
   --router "<your-agent-name>|http://127.0.0.1:5100"
 ```
 
-The route must be anthropic-shaped (the same rule as the default engines). The workspace groups every
-`runmission*` engine under one **MissionRun** entry with a model picker, so the variants show as a single
-item with a choice of model. Restart the agent after adding them.
+**Recognized MissionRun variant names** — use the one whose model matches what you are sealing:
+
+```
+missionglm5   missionrunkimiaz   missionrundeepseek   missionqwen       missiongflash
+missionnemo   missionrunoss      missionrunnova       missionrun5mini   missionrun5nano
+```
+
+For example, `--name missionglm5` for GLM-5, `--name missionrunkimiaz` for Kimi on Azure. The route
+(left of `|`) must be an anthropic-shaped route your `upstreams.yaml` serves; the model id (right of
+`|`) is what the provider expects. Do **not** invent a name such as `runmission-glm5` — the workspace
+matches these names exactly, so an unlisted name is not grouped. Restart the agent after adding the
+variants, then run `hexaeight-activate engines-sync` and hard-refresh the browser (as above) so the
+new variants appear in the **MissionRun** model picker.
 
 ## Step 6 — Restore automatic startup
 
@@ -172,12 +206,32 @@ If Step 1 disabled any startup automation, choose one of the following:
 
 ## Step 7 — Start and verify
 
+> **Kill the old browser and memory services first — this step is not optional.** `checkservices`
+> only *starts a service that is down*; it does **not** replace one that is already running. If an old
+> `service.mjs` from the previous release is still bound to its port, the agent (and `checkservices`)
+> **adopt that running process** and the new code never takes effect — the symptom is an upgraded
+> workspace still behaving like the old one (missing endpoints, `not found` on import, stale panes).
+> Explicitly stop whatever is on ports 5623 and 5624 before starting, so the newly installed
+> `service.mjs` is the process that comes up:
+>
+> ```bash
+> # Linux / macOS — free the two sidecar ports so the NEW service.mjs starts fresh
+> lsof -ti tcp:5624 | xargs -r kill        # memory service
+> lsof -ti tcp:5623 | xargs -r kill        # browser service
+> ```
+>
+> Then bring everything up:
+
 ```bash
 hexaeight-activate restart router
+hexaeight-activate restart memory
+hexaeight-activate restart browser
 hexaeight-activate checkservices
 ```
 
 `restart router` restarts the router and then the agent and its services in the correct order.
+`restart memory` and `restart browser` force each sidecar to stop and start again on the new code
+(run them after the kill above so a stale process is never adopted).
 `checkservices` reports each service and starts any that is not yet running. All four should be
 listed as **UP**:
 

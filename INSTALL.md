@@ -750,21 +750,31 @@ Do not argue the point, and do not quietly edit the file anyway.
 ### Running a mission on several models
 
 A mission is run by the `runmission` engine. To offer the SAME mission on more than one model — so the
-person can pick which model answers — seal one `runmission` variant per model. Each variant is the same
+person can pick which model answers — seal one variant per model. Each variant is the same
 mission-runner pinned to a different route/model; run this once per model:
 
 ```bash
 cd ~/hbia-agent
 hexaeight-activate engine --add runmission \
-  --model "<route>|<provider-model-id>" \
-  --name  runmission-<label> \
+  --model  "<route>|<provider-model-id>" \
+  --name   <recognized-name> \
   --router "<router identity name>|http://127.0.0.1:5100"
 ```
 
-`--name` gives the variant a stable label (use the `runmission-<label>` form, e.g. one per model). The
-route must be anthropic-shaped, the same rule as the default engines. Restart the agent afterwards.
-The workspace groups every `runmission*` engine under one **MissionRun** entry with a model picker, so
-these variants appear as one item with a choice of model — not as several separate engines.
+The base engine passed to `--add` is `runmission`. **The `--name` must be one of the names the workspace
+already groups under MissionRun**, or the variant seals correctly but shows as its own separate rail item
+instead of appearing in the MissionRun model picker:
+
+```
+missionglm5   missionrunkimiaz   missionrundeepseek   missionqwen       missiongflash
+missionnemo   missionrunoss      missionrunnova       missionrun5mini   missionrun5nano
+```
+
+Use the name whose model matches what you are sealing — e.g. `--name missionglm5` for GLM-5,
+`--name missionrunkimiaz` for Kimi on Azure. The route (left of `|`) must be anthropic-shaped, the same
+rule as the default engines. Do **not** invent a name such as `runmission-glm5`: the workspace matches
+these names exactly, so an unlisted name is not grouped. Restart the agent afterwards; the variants then
+appear as one **MissionRun** entry with a model picker — not as several separate engines.
 
 ### Adding another engine later
 
