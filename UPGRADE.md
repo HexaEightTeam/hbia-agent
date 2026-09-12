@@ -1,7 +1,7 @@
 # Upgrading HexaEight Bridge Identity Agent
 
-This guide upgrades an existing HBIA installation to the release that adds the workspace **browser**
-and **memory** services. For a first-time installation, see [INSTALL.md](INSTALL.md).
+This guide upgrades an existing HBIA installation to the current release. For a first-time
+installation, see [INSTALL.md](INSTALL.md).
 
 **Estimated time:** 15–20 minutes, most of it downloads.
 
@@ -9,18 +9,14 @@ and **memory** services. For a first-time installation, see [INSTALL.md](INSTALL
 
 ## What this release adds
 
-- **Missions** — a dedicated Missions view: list your ingested missions, examine each one's cards and
-  flowchart, run it, open it to edit, and export/import a mission (with its skills) as a single bundle.
-- **Mission-runner engine** — `runmission` is now a default engine, and several model-pinned variants
-  can be sealed so one mission is offered on a choice of models (see Step 5).
-- **Per-session cost** — a Calculate-cost control on mission-runner sessions that prices a session's
-  usage and breaks it down per question.
-- **Improved document ingestion** in the harness engine (structural chunking with a coverage guard),
-  and a rewritten Home onboarding.
+- **Stop** — the workspace **Stop** button now ends the turn in progress immediately.
+- **Router** — a reply fix for reasoning models: an answer that arrived only as the model's reasoning
+  is no longer dropped.
 
-The agent, the second engine binary and the router are carried forward unchanged. The browser (`5623`)
-and memory (`5624`) services from the previous release continue to be installed with the workspace and
-supervised by the agent.
+The agent, the harness engine, the router and the workspace all change in this release, so update each
+(Steps 4–7). Only the second engine binary (`mindmapchat`) is carried forward unchanged. The browser
+(`5623`) and memory (`5624`) services continue to be installed with the workspace and supervised by
+the agent.
 
 ---
 
@@ -219,6 +215,11 @@ If Step 1 disabled any startup automation, choose one of the following:
 > lsof -ti tcp:5624 | xargs -r kill        # memory service
 > lsof -ti tcp:5623 | xargs -r kill        # browser service
 > ```
+>
+> **Adopted ≠ supervised.** A process the agent *adopted* (found already on the port, with a PPID from
+> an older agent) is not under the supervisor — if it dies or you kill it, the agent will NOT restart it
+> automatically. After freeing the port you must run `hexaeight-activate restart browser` (or
+> `restart memory`) yourself, and confirm the new process's PPID is the current agent, not the old one.
 >
 > Then bring everything up:
 
