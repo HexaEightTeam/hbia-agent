@@ -9,12 +9,28 @@ installation, see [INSTALL.md](INSTALL.md).
 
 ## What this release adds
 
-- **Stop** — the workspace **Stop** button now ends the turn in progress immediately.
-- **Router** — a reply fix for reasoning models: an answer that arrived only as the model's reasoning
-  is no longer dropped.
+- **A baseline agent policy.** A locked-down agent used to be admitted-owner and nothing else, which
+  signs in and then fails at everything unattended. `init-policy` now writes the whole working
+  baseline, and **existing installations get it with one command** — see
+  [Step 6](#step-6--apply-the-baseline-agent-policy). If your agent has no policy at all, it is open
+  to anyone who can authenticate; this is the release that closes it.
+- **Policy commands confirm what they wrote.** Every policy verb re-reads the stored policy afterwards
+  and reports a failure if the rules are not there, instead of reporting success. Where the policy
+  cannot be written safely the command now refuses and says so, rather than continuing.
+- **New mission priming.** The mission engine's prompt has been rewritten. It is applied by
+  `engine --validate` in Step 5 — **[check that it took effect](#confirm-the-priming-was-upgraded)**,
+  because an engine sealed with the old priming keeps running the old one silently.
+- **Full-text retrieval from a memory hit.** A search result now names the document it came from, so a
+  snippet can be followed to the whole document.
+- **Served (remote) memories.** Listing a memory served by another agent now names the serving agent.
+  A **Refresh description** control in the Memory pane pulls a served memory's current description
+  without unregistering and re-registering it.
+- **Large memories are not exported by default.** A memory over 500 MB is marked `.no-export` and left
+  out of a mission export, with the exclusion listed in the manifest, so an export cannot silently try
+  to carry a corpus.
 
-The agent, the harness engine, the router and the workspace all change in this release, so update each
-(Steps 4–7). Only the second engine binary (`mindmapchat`) is carried forward unchanged. The browser
+The agent, the harness engine and the workspace all change in this release, so update each (Steps 4–8).
+The router and the second engine binary (`mindmapchat`) are carried forward unchanged. The browser
 (`5623`) and memory (`5624`) services continue to be installed with the workspace and supervised by
 the agent.
 
@@ -43,7 +59,7 @@ hexaeight-activate stop all
 ```
 
 If you start any HexaEight service from `cron`, `systemd`, or launchd, disable those entries now. You
-will re-point them at the new locations in Step 6 (or let the agent manage them for you).
+will re-point them at the new locations in Step 7 (or let the agent manage them for you).
 
 ## Step 2 — Update the command-line tool
 
@@ -51,7 +67,9 @@ will re-point them at the new locations in Step 6 (or let the agent manage them 
 dotnet tool update --global HexaEight.Activate
 ```
 
-This release requires **HexaEight.Activate 1.0.45 or later**.
+This release requires **HexaEight.Activate 1.0.54 or later**. Check what you have with
+`hexaeight-activate --version`; the baseline policy command in Step 6 and the new mission priming in
+Step 5 both ship inside the tool, so an older one will not install either.
 
 ## Step 3 — Update the runtime
 
@@ -114,7 +132,57 @@ hexaeight-activate engine --validate
 (reusing an existing engine's route), so an upgrade brings the sealed set up to date without re-asking
 for a route or model.
 
-**The engines to keep are exactly:** `claude`, `harness`, `chat`, `coding`, `mission`, and `runmission`
+### The mission priming changed in this release — check it was applied
+
+An engine's priming is **sealed into `engines.he` on your machine**, not read from the tool at run
+time. Updating the tool and the agent therefore does *not* change how a sealed engine behaves: until
+it is re-sealed it keeps running the priming it was sealed with, and nothing reports that it is out of
+date. `engine --validate` is what re-seals it.
+
+When it re-seals the mission engine it says so:
+
+```
+  mission: re-sealing to the current prompt set (route and model unchanged)
+```
+
+**If you did not see that line, the mission engine was already current or was not re-sealed — verify
+rather than assume.**
+
+#### Confirm the priming was upgraded
+
+Dump what is actually sealed and look at the mission engine's priming:
+
+```bash
+hexaeight-agent export --plaintext --out ./engines-check.json
+```
+
+In that file, find `"mission"` → `"skills"` → `"priming"`. Its **first line** carries the version:
+
+```
+HEIA-PRIMING-VERSION: 99
+```
+
+`99` is this release's mission priming. A lower number (or no version line) means the engine is still
+sealed with the previous prompt — re-run `hexaeight-activate engine --validate` from the identity
+folder and check again. Delete `engines-check.json` when you are done: it is a plaintext copy of your
+sealed engine definitions, including routes and model ids.
+
+**Then restart the agent.** Sealed engines are read at start, so a re-sealed engine does not take
+effect until the agent restarts (Step 8).
+
+#### The two primings that matter, and which engines carry them
+
+| priming | engines that carry it | changed in this release |
+|---|---|---|
+| **mission** (authoring) | `mission` | **yes** — `HEIA-PRIMING-VERSION: 99` |
+| **mission runner** | `runmission` and every model-pinned runner you sealed (`missionglm5`, `missionrunkimiaz`, …) | no — `HEIA-PRIMING-VERSION: 2` |
+
+`--validate` re-seals `mission` for you. The model-pinned runners are engines *you* added, so it
+leaves them alone — correct this release, because the runner priming is unchanged and they are
+already current. Confirm it the same way: in the dump above, every runner's `skills.priming` should
+begin `HEIA-PRIMING-VERSION: 2` and be identical to the others.
+
+**The engines to keep are exactly:** `claude`, `harness`, `chat`, `coding`, `mission`, and `missionrun`
 (the mission-runner). Do **not** seal `prepare` unless the operator specifically asks for it.
 
 To see what is currently sealed, inspect the engine names in `hexaeight-agent.json` (there is no
@@ -170,7 +238,47 @@ matches these names exactly, so an unlisted name is not grouped. Restart the age
 variants, then run `hexaeight-activate engines-sync` and hard-refresh the browser (as above) so the
 new variants appear in the **MissionRun** model picker.
 
-## Step 6 — Restore automatic startup
+## Step 6 — Apply the baseline agent policy
+
+**Run this even if you have locked your agent down before.** A policy that only admits the owner is
+the state most installations are in, and it is not enough to work: skill and mission runs fail the
+moment nobody is signed in, the router's replies bounce, the memory pane stays blank, and an external
+corpus refuses. Those look like four unrelated bugs and are one missing baseline.
+
+From your agent identity folder:
+
+```bash
+hexaeight-activate add-policy base-default
+```
+
+It works out its own subjects — the agent name from the identity in the folder, the owner from
+`hexaeight-agent.json` (it asks if there is none), and any peer agents from the memories this agent is
+pointed at — then prints every rule with the reason it exists before writing. Rules you added yourself
+are left alone, and it is safe to re-run.
+
+To see the rules without writing anything, add `--dry-run`. To name the owner explicitly, or a peer it
+could not discover:
+
+```bash
+hexaeight-activate add-policy base-default --owner you@company.com --peer other-agent.example.com
+```
+
+> **If your agent has no policy at all, it is OPEN** — anyone who can authenticate is admitted. The
+> command reports this, and `--replace-open` also removes a blanket `* -> *` inbound allow if one is
+> present. It will not remove that row without being told to.
+
+Confirm what is enforced — not what was written:
+
+```bash
+hexaeight-activate list-policy
+```
+
+The last line should read **`inbound default: DENY — unlisted callers are refused.`**
+
+> **A fresh installation does this in `init-policy` instead** (see INSTALL.md); it now writes the same
+> baseline. `add-policy base-default` is the path for an agent that already exists.
+
+## Step 7 — Restore automatic startup
 
 If Step 1 disabled any startup automation, choose one of the following:
 
@@ -200,7 +308,7 @@ If Step 1 disabled any startup automation, choose one of the following:
   Startup entries that still point at a previous location are the most common cause of a service not
   coming back after an upgrade.
 
-## Step 7 — Start and verify
+## Step 8 — Start and verify
 
 > **Kill the old browser and memory services first — this step is not optional.** `checkservices`
 > only *starts a service that is down*; it does **not** replace one that is already running. If an old
@@ -329,3 +437,7 @@ so an earlier agent simply ignores service entries it does not recognise.
 | macOS agent exits immediately (`Killed: 9`) | The binary needs re-signing — see the note in Step 4. |
 | Sign-in does not show the agent, or cannot reach it after upgrade | `config.js` was replaced by the upgrade. Restore it, or set it per [The workspace deployment config](#the-workspace-deployment-config-configjs), then hard-refresh the browser. |
 | Sign-in asks only for an email (no agent name/URL) | `localWorkspace` is `true`. That is the all-in-one local shortcut. For a named/remote agent set it to `false`. |
+| A skill or mission run fails with `bind said 404`, but the same thing works while you are signed in | The agent has no outbound `op:*` rule **for itself**, so unattended work is refused. Run Step 6. |
+| Mission replies look like the previous release | The mission engine is still sealed with the old priming. Re-run `engine --validate`, confirm the version as in [Confirm the priming was upgraded](#confirm-the-priming-was-upgraded), then restart the agent. |
+| A policy command reports that the policy could not be written | This identity cannot encrypt its policy, so nothing was saved. Run `hexaeight-activate verify-license`, and **treat the agent as open until it is resolved** — confirm with `list-policy`. |
+| `add-policy base-default` says the policy file is unreadable | It found bytes on disk that decode to no rules — usually a plaintext `policy.csv` from a much older build. It keeps a copy as `policy.csv.unreadable_<timestamp>` and writes nothing. Move the old file aside and re-run. |
