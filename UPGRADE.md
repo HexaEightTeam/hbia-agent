@@ -9,30 +9,30 @@ installation, see [INSTALL.md](INSTALL.md).
 
 ## What this release adds
 
-- **A baseline agent policy.** A locked-down agent used to be admitted-owner and nothing else, which
-  signs in and then fails at everything unattended. `init-policy` now writes the whole working
-  baseline, and **existing installations get it with one command** — see
-  [Step 6](#step-6--apply-the-baseline-agent-policy). If your agent has no policy at all, it is open
-  to anyone who can authenticate; this is the release that closes it.
-- **Policy commands confirm what they wrote.** Every policy verb re-reads the stored policy afterwards
-  and reports a failure if the rules are not there, instead of reporting success. Where the policy
-  cannot be written safely the command now refuses and says so, rather than continuing.
-- **New mission priming.** The mission engine's prompt has been rewritten. It is applied by
-  `engine --validate` in Step 5 — **[check that it took effect](#confirm-the-priming-was-upgraded)**,
-  because an engine sealed with the old priming keeps running the old one silently.
-- **Full-text retrieval from a memory hit.** A search result now names the document it came from, so a
-  snippet can be followed to the whole document.
-- **Served (remote) memories.** Listing a memory served by another agent now names the serving agent.
-  A **Refresh description** control in the Memory pane pulls a served memory's current description
-  without unregistering and re-registering it.
-- **Large memories are not exported by default.** A memory over 500 MB is marked `.no-export` and left
-  out of a mission export, with the exclusion listed in the manifest, so an export cannot silently try
-  to carry a corpus.
+- **Mission state.** The agent now keeps a sealed record of every run of a mission — the goal, where
+  each thread of work is, what was tried, what failed, what the person said — and gives the engine a
+  short state block at the start of every turn, with the lessons of earlier runs of the same mission
+  carried forward. The record lives inside the agent and is served to the engine over the same
+  per-turn credential the browser uses; nothing is written to the session's working folder. An
+  engine running without the agent has no mission memory and says so.
+- **Every mission reply is a card.** Mission authoring, `runmission` and every model-pinned runner
+  variant now answer with a UI card, and the harness engine validates it: a reply whose card is
+  missing, unfinished or not valid JSON is sent back to the model for correction before it reaches
+  the workspace, and the diagram or cards block that came with it is kept. Applied by
+  `engine --validate` in Step 5 — **[check that it took effect](#confirm-the-priming-was-upgraded)**.
+- **Mission runs can see what they build.** The runner has the same browser the other engines have,
+  and its priming carries a render → screenshot → compare → fix loop for anything with an appearance.
+- **Images are measured, not just described.** Reading an image now attaches the picture itself and
+  reports its palette, gradients (with positions), layout bands and text positions; reading a GIF
+  reports what moves and how. This is what lets a mission reproduce a reference page or screenshot.
+- **Workspace.** A follow-up turn no longer repeats the previous answer at the top of its bubble, and
+  mission ingest checks for duplicate branch labels per decision node rather than across the whole
+  diagram.
 
-The agent, the harness engine and the workspace all change in this release, so update each (Steps 4–8).
-The router and the second engine binary (`mindmapchat`) are carried forward unchanged. The browser
-(`5623`) and memory (`5624`) services continue to be installed with the workspace and supervised by
-the agent.
+The agent, the harness engine, the workspace and the command-line tool all change in this release, so
+update each (Steps 2–8). The router and the second engine binary (`mindmapchat`) are carried forward
+unchanged. The browser (`5623`) and memory (`5624`) services continue to be installed with the
+workspace and supervised by the agent.
 
 ---
 
@@ -67,9 +67,9 @@ will re-point them at the new locations in Step 7 (or let the agent manage them 
 dotnet tool update --global HexaEight.Activate
 ```
 
-This release requires **HexaEight.Activate 1.0.54 or later**. Check what you have with
-`hexaeight-activate --version`; the baseline policy command in Step 6 and the new mission priming in
-Step 5 both ship inside the tool, so an older one will not install either.
+This release requires **HexaEight.Activate 1.0.55 or later**. Check what you have with
+`hexaeight-activate --version`; the baseline policy command in Step 6 and the new mission and runner
+primings in Step 5 all ship inside the tool, so an older one will not install them.
 
 ## Step 3 — Update the runtime
 
@@ -132,20 +132,25 @@ hexaeight-activate engine --validate
 (reusing an existing engine's route), so an upgrade brings the sealed set up to date without re-asking
 for a route or model.
 
-### The mission priming changed in this release — check it was applied
+### The mission and runner primings changed in this release — check they were applied
 
 An engine's priming is **sealed into `engines.he` on your machine**, not read from the tool at run
 time. Updating the tool and the agent therefore does *not* change how a sealed engine behaves: until
 it is re-sealed it keeps running the priming it was sealed with, and nothing reports that it is out of
 date. `engine --validate` is what re-seals it.
 
-When it re-seals the mission engine it says so:
+When it re-seals an engine it says so — one line for the mission engine, one for `runmission`, and one
+for **each** model-pinned runner variant you have sealed:
 
 ```
   mission: re-sealing to the current prompt set (route and model unchanged)
+  runmission: re-sealing to the current prompt set (route and model unchanged)
+  missionrunkimiaz: mission-runner variant — re-sealing to the current runmission prompt set (route and model unchanged)
+  …
+  N engine(s) updated to the current prompt set.
 ```
 
-**If you did not see that line, the mission engine was already current or was not re-sealed — verify
+**If you did not see those lines, the engines were already current or were not re-sealed — verify
 rather than assume.**
 
 #### Confirm the priming was upgraded
@@ -159,10 +164,10 @@ hexaeight-agent export --plaintext --out ./engines-check.json
 In that file, find `"mission"` → `"skills"` → `"priming"`. Its **first line** carries the version:
 
 ```
-HEIA-PRIMING-VERSION: 99
+HEIA-PRIMING-VERSION: 104
 ```
 
-`99` is this release's mission priming. A lower number (or no version line) means the engine is still
+`104` is this release's mission priming. A lower number (or no version line) means the engine is still
 sealed with the previous prompt — re-run `hexaeight-activate engine --validate` from the identity
 folder and check again. Delete `engines-check.json` when you are done: it is a plaintext copy of your
 sealed engine definitions, including routes and model ids.
@@ -174,13 +179,15 @@ effect until the agent restarts (Step 8).
 
 | priming | engines that carry it | changed in this release |
 |---|---|---|
-| **mission** (authoring) | `mission` | **yes** — `HEIA-PRIMING-VERSION: 99` |
-| **mission runner** | `runmission` and every model-pinned runner you sealed (`missionglm5`, `missionrunkimiaz`, …) | no — `HEIA-PRIMING-VERSION: 2` |
+| **mission** (authoring) | `mission` | **yes** — `HEIA-PRIMING-VERSION: 104` |
+| **mission runner** | `runmission` and every model-pinned runner you sealed (`missionglm5`, `missionrunkimiaz`, …) | **yes** — `HEIA-PRIMING-VERSION: 7` |
 
-`--validate` re-seals `mission` for you. The model-pinned runners are engines *you* added, so it
-leaves them alone — correct this release, because the runner priming is unchanged and they are
-already current. Confirm it the same way: in the dump above, every runner's `skills.priming` should
-begin `HEIA-PRIMING-VERSION: 2` and be identical to the others.
+`--validate` re-seals all of them: `mission`, `runmission`, **and every model-pinned runner variant**
+(it recognises a variant by the runner priming it carries and re-seals it to the current runner
+prompt set, keeping its route and model). Confirm it the same way: in the dump above, `mission`'s
+`skills.priming` begins `HEIA-PRIMING-VERSION: 104`, and every runner's begins
+`HEIA-PRIMING-VERSION: 7` and is identical to the others. Each runner's `argsNew` also carries
+`--require-ui` — that is what makes the engine validate its card before replying.
 
 **The engines to keep are exactly:** `claude`, `harness`, `chat`, `coding`, `mission`, and `missionrun`
 (the mission-runner). Do **not** seal `prepare` unless the operator specifically asks for it.
@@ -439,5 +446,6 @@ so an earlier agent simply ignores service entries it does not recognise.
 | Sign-in asks only for an email (no agent name/URL) | `localWorkspace` is `true`. That is the all-in-one local shortcut. For a named/remote agent set it to `false`. |
 | A skill or mission run fails with `bind said 404`, but the same thing works while you are signed in | The agent has no outbound `op:*` rule **for itself**, so unattended work is refused. Run Step 6. |
 | Mission replies look like the previous release | The mission engine is still sealed with the old priming. Re-run `engine --validate`, confirm the version as in [Confirm the priming was upgraded](#confirm-the-priming-was-upgraded), then restart the agent. |
+| A mission run answers in plain text instead of a card | That runner engine was not re-sealed. Re-run `engine --validate` and check that its `argsNew` carries `--require-ui` and its priming begins `HEIA-PRIMING-VERSION: 7`, then restart the agent. |
 | A policy command reports that the policy could not be written | This identity cannot encrypt its policy, so nothing was saved. Run `hexaeight-activate verify-license`, and **treat the agent as open until it is resolved** — confirm with `list-policy`. |
 | `add-policy base-default` says the policy file is unreadable | It found bytes on disk that decode to no rules — usually a plaintext `policy.csv` from a much older build. It keeps a copy as `policy.csv.unreadable_<timestamp>` and writes nothing. Move the old file aside and re-run. |
