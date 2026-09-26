@@ -1,0 +1,3 @@
+# Verified with Python 3.12
+crewai==1.15.2
+litellm==1.93.0

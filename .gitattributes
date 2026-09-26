@@ -1,0 +1,2 @@
+# Example files are checked against SHA256SUMS; keep their bytes exact on every OS (no CRLF conversion).
+integration_examples/** -text
