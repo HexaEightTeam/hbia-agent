@@ -13,11 +13,27 @@ which command may run**, and **CrewAI doing the work**.
 
 ## Requirements
 
-- **HexaEight agent r29 and harness engine r38 or later.** Earlier releases do not copy a mission's
-  files into each turn, do not hand the turn's ticket to a launched process, and lose the approval of a
-  parked command. Check with `hexaeight-activate verify-env`.
-- Python 3.12 and the packages in `requirements.txt`.
+- **HexaEight agent r29 and harness engine r38 or later**, and **Activate 1.0.66 or later**. Earlier
+  releases do not copy a mission's files into each turn, do not hand the turn's ticket to a launched
+  process, and lose the approval of a parked command. Check with `hexaeight-activate verify-env`.
+- **Python 3.10–3.13** (CrewAI 1.15.2 does not support 3.14). If your system Python is newer, install
+  [uv](https://docs.astral.sh/uv/) and `enable crewai` fetches Python 3.12 for the environment itself.
 - A model route in your router (the mission runs on your `runmission` engine's route).
+
+## Install — one command
+
+From your agent's folder:
+
+```bash
+hexaeight-activate enable crewai
+```
+
+It creates `~/.heia/frameworks/crewai/.venv` with the pinned packages, downloads the mission bundle from
+the `integration-crewai-v1` release and verifies it against a hash built into the tool, imports the
+mission, and has the agent seal its command set: one command, pinned to the runner file's sha256. Then in
+the workspace choose `runmission` → `CrewAI_v1_Runner`.
+
+The manual steps below do the same thing by hand, and are worth reading once.
 
 ## What is in this folder
 
@@ -28,8 +44,9 @@ which command may run**, and **CrewAI doing the work**.
 | `SHA256SUMS` | hashes of the runner, the requirements, and the mission bundle |
 
 The **mission bundle** (`mission-CrewAI_v1_Runner.zip`: flowchart, two cards, the fence, and this same
-runner) is a release asset — release artifacts are attached to GitHub Releases, never committed. Download
-it from the [latest release](https://github.com/HexaEightTeam/hbia-agent/releases/latest) into this folder.
+runner) is a release asset — release artifacts are attached to GitHub Releases, never committed. It is in
+the [integration-crewai-v1](https://github.com/HexaEightTeam/hbia-agent/releases/tag/integration-crewai-v1)
+release; `enable crewai` downloads and verifies it for you.
 
 ## How it works
 
@@ -51,9 +68,9 @@ The command is identical on every run and every machine. It is approved **once**
 pinned to the runner file's sha256: change one byte and it will not run until it is reviewed and approved
 again. The runner travels **inside** the mission, and each turn gets a fresh copy of the approved file.
 
-## Install
+## Install by hand
 
-**1. The CrewAI environment** — where the runner looks for it:
+**1. The CrewAI environment** — where the runner looks for it (Python 3.10–3.13):
 
 ```bash
 python3 -m venv ~/.heia/frameworks/crewai/.venv
@@ -67,25 +84,21 @@ sha256sum -c SHA256SUMS
 hexaeight-activate agskill-import --in mission-CrewAI_v1_Runner.zip
 ```
 
-**3. Approve the runner once.** Approvals never travel with a bundle — they belong to your agent. In the
-workspace, open the mission in an authoring session (Duplicate it), ask it to run the card once, read the
-review of `crewai_heia_runner.py` it gives you, and reply `approved`.
-
-**4. Give the mission its command set** — the approval, sealed under the mission's name. From your
-agent's folder:
+**3. Give the mission its command set** — review `crewai_heia_runner.py` first; sealing it is your
+approval. Approvals never travel with a bundle; they belong to your agent. From your agent's folder:
 
 ```bash
 set -a; . ./env-file; set +a
-./hexaeight-agent-linux-x64 cmdset export --session <the authoring session id> --name CrewAI_v1_Runner
+./hexaeight-agent-linux-x64 cmdset seal --name CrewAI_v1_Runner \
+    --file ~/.hexaeight-harness/memories/CrewAI_v1_Runner/crewai_heia_runner.py \
+    --command "python3 crewai_heia_runner.py --question-file crewai-question.txt"
 ./hexaeight-agent-linux-x64 cmdset show --name CrewAI_v1_Runner
 ```
 
 `cmdset show` must list the runner's sha256 — the first line of `SHA256SUMS`. A mission with no command
 set runs no commands at all.
 
-**5. Run it:** in the workspace choose `runmission` → `CrewAI_v1_Runner`.
-
-> Steps 3–4 are manual today. A single `hexaeight-activate enable crewai` that does 1–4 is planned.
+**4. Run it:** in the workspace choose `runmission` → `CrewAI_v1_Runner`.
 
 ## Weather, news and your documents
 
