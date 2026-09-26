@@ -7,7 +7,26 @@ installation, see [INSTALL.md](INSTALL.md).
 
 ---
 
-## What this release adds
+## What this release adds (agent r29, harness engine r38, Activate 1.0.66)
+
+- **Approving a parked command works again.** A command that waits for your approval now runs after you
+  reply `approved`. Since sessions got their own working folders, the approval was recorded but never
+  matched, so the command asked again every time.
+- **Framework runners as sealed missions.** A mission can carry its own runner file (for example a
+  CrewAI crew). The harness copies the mission's files into each turn's folder, and hands the turn's
+  credential to the command it launches, so the runner can search memories and call other agents' API
+  routes — through the agent, under its policy. See
+  [integration_examples/crewai](integration_examples/crewai).
+- **`cmdset seal`.** A mission's command set can be sealed straight from a file: one command, pinned to
+  the file's sha256, with no authoring session in between.
+- **`hexaeight-activate enable crewai`.** Installs a pinned CrewAI environment, the verified
+  `CrewAI_v1_Runner` mission, and seals its command set, in one step.
+
+The command-line tool, the runtime's harness engine and the agent change in this release (Steps 2, 3
+and 4, then start and verify in Step 8). The workspace (r34), the router and the second engine binary
+(`mindmapchat`) are carried forward unchanged — Step 5 can be skipped.
+
+### Earlier: what r27 added
 
 - **Mission state.** The agent now keeps a sealed record of every run of a mission — the goal, where
   each thread of work is, what was tried, what failed, what the person said — and gives the engine a

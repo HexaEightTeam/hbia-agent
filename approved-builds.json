@@ -14,7 +14,7 @@
     "Bump version whenever builds change; the tool reports it so an operator can see what they synced.",
     "A protection hash is the SHA-512 of the extracted entry dll. It no longer requires a machine of that kind: the dll is embedded verbatim in the single-file bundle, so hashing the build's own intermediate dll gives the same value - verified on linux-x64 and confirmed on Apple Silicon for r14. See releases.json and ghreleasedocument.md."
   ],
-  "version": 16,
+  "version": 17,
   "builds": [
     {
       "hash": "6EA5D05BE38262932A22810A132A88F54A54A460467ACF076C63620A6D3CE6BAB15EA52B62FBE0BE4C654014220AE8B94F5C7DE65D55E23CB1484ACCD37524FC",
@@ -214,6 +214,21 @@
     {
       "hash": "3514D5F7761F7B38A5BE6A31B2D658D8E81CFECA48C942F6C14F234A6741096D0AD5F0DBA92775908AB9FF41C1B3F68DD3D7823974938276225991BFDD0D6064",
       "label": "hexaeight-agent 2026-09-24 r28 osx-arm64 (external runner provisioning)",
+      "allow": true
+    },
+    {
+      "hash": "734B36DC220022DAB1683B9A42C8435B0A107F5C7D33CF963AD46FD3E2A1DEC4847FEA62F39AD5A875B49B8AD94FFDB4DB3E09EEE376066B82A0D5E4C42347E2",
+      "label": "hexaeight-agent 2026-09-27 r29 win-x64 (approval of parked commands; cmdset seal)",
+      "allow": true
+    },
+    {
+      "hash": "CECB0D025E5CC97E177CEA483CBBC12760C88254E5FFE86A8EEE2704E3E49A3C2B66AF4C6E09C649E5844AF2333E67CAF06B52F1C4B2CBB912CD573B87AD94C3",
+      "label": "hexaeight-agent 2026-09-27 r29 linux-x64 (approval of parked commands; cmdset seal)",
+      "allow": true
+    },
+    {
+      "hash": "FECF84C43C0FF5285510FCFCEB8C93CB6726916EB0F5410C1E8E1238D09782F5BA7FB48F56442A7210A223716075CF860F4F9A470887AB052E4FE0B021E9A044",
+      "label": "hexaeight-agent 2026-09-27 r29 osx-arm64 (approval of parked commands; cmdset seal)",
       "allow": true
     }
   ]
