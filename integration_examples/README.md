@@ -20,9 +20,9 @@ Run an agent built with **CrewAI, LangGraph, PydanticAI or Agno** behind a HexaE
 
 ## Requirements
 
-- **HexaEight agent r29, harness engine r39 and Activate 1.0.67, or later.** r39 is what runs a direct
-  mission without a model step; r29 is what seals the command set. Check with
-  `hexaeight-activate verify-env`.
+- **HexaEight agent r29, harness engine r40 and Activate 1.0.67, or later.** The engine runs a direct
+  mission without a model step (r39) and hands a runner's external callers their question (r40); r29
+  is what seals the command set. Check with `hexaeight-activate verify-env`.
 - **Python 3.10–3.13.** If your system Python is newer, install [uv](https://docs.astral.sh/uv/) and
   `enable` fetches Python 3.12 for the environment itself. Or point it at an environment you already
   have: `enable <framework> --venv PATH`.
@@ -72,6 +72,44 @@ is that the approved, sha-pinned `runner.py` is what ran.
 The command is identical on every run and every machine. It is approved **once**, and the approval is
 pinned to `runner.py`'s sha256: change one byte and it will not run until it is sealed again. The
 runner travels **inside** the mission, and each turn gets a fresh copy of the approved file.
+
+## Serve it to other people and systems — a runner
+
+The steps above put the framework behind **your** workspace. To let a backend or another agent call it
+(BYOA), give it a **runner**: a second agent under the same identity that serves this one mission to
+external callers, with its own ports, store and policy.
+
+```bash
+hexaeight-activate add-runner --from ~/<your-agent-folder> --dir ~/runner-crewai \
+    --mission CrewAI_v1_Runner --owner <you@example.com> --license personal \
+    --model "<route|model>"                       # a model that makes real tool calls — see below
+cd ~/runner-crewai
+hexaeight-activate enable crewai                  # installs the mission into THIS runner's store
+hexaeight-activate runner-memory --share weather --share bbc-news
+hexaeight-activate restart agent                  # stops and starts only this folder's agent
+```
+
+**A runner sees only what you export into it.** Until then it knows its mission and nothing else — not
+your workspace's memories, not your documents. `runner-memory` decides, one memory at a time:
+
+```bash
+hexaeight-activate runner-memory --list
+hexaeight-activate runner-memory --share Indian-Statues-And-Sections     # local: linked, no copy
+hexaeight-activate runner-memory --share Indian-Statues-And-Sections --copy   # or a self-contained copy
+hexaeight-activate runner-memory --unshare bbc-news
+```
+
+A served memory (weather, a news feed, another agent's corpus) is exported as its pointer, and every call
+still goes through the runner's own policy. Each caller session gets its own working folder under
+`~/runner-crewai-frontdoor/work/`.
+
+**Choose the runner's model.** Without `--model`, `add-runner` copies your agent's mission route. The
+framework needs a model that really calls tools: measured on one route, a model answered weather and
+"who am I" by inventing a tool result instead of calling the tool; another route called the tools every
+time. Check the runner's `crewai-run.log` (one `[tool]` line per call) on your first questions.
+
+Callers reach the runner through BYOA — the caller vouched for the person it acts for, and that person
+allowed by the runner's and the router's policy. See *Call an agent from your backend* in the docs.
 
 ## Make it yours
 
