@@ -7,7 +7,26 @@ installation, see [INSTALL.md](INSTALL.md).
 
 ---
 
-## What this release adds (agent r29, harness engine r38, Activate 1.0.66)
+## What this release adds (harness engine r39, workspace r35, Activate 1.0.67)
+
+- **Four agent frameworks as sealed missions.** `hexaeight-activate enable crewai`, `enable langgraph`,
+  `enable pydanticai` and `enable agno` each install a pinned environment, the verified mission and its
+  sealed command set in one step. Every framework runs on the same one-card mission with its own
+  `runner.py`; the framework answers and says so. `--venv PATH` uses an environment you already have.
+  See [integration_examples](integration_examples/).
+- **Direct missions (engine r39).** A mission whose card says `mode: direct` hands each message straight
+  to the card's approved command and returns what it printed — no model step in the harness.
+- **Re-ingesting a mission drops the cards you removed (workspace r35).** They used to stay in the
+  mission's memory and keep being found.
+- **CrewAI moves to its v2 bundle.** Same mission name, now on the shared card with `runner.py`. If you
+  installed it with 1.0.66, run `hexaeight-activate enable crewai --force` from your agent's folder; the
+  v1 mission is kept under `~/.hexaeight-harness/backups/`.
+
+The command-line tool, the runtime's harness engine and the workspace change in this release (Steps 2,
+3 and 5, then start and verify in Step 8). The agent (r29), the router and the second engine binary
+(`mindmapchat`) are unchanged; Step 4 is still safe to run and only re-verifies them.
+
+### Earlier: what r29 added
 
 - **Approving a parked command works again.** A command that waits for your approval now runs after you
   reply `approved`. Since sessions got their own working folders, the approval was recorded but never
@@ -21,10 +40,6 @@ installation, see [INSTALL.md](INSTALL.md).
   the file's sha256, with no authoring session in between.
 - **`hexaeight-activate enable crewai`.** Installs a pinned CrewAI environment, the verified
   `CrewAI_v1_Runner` mission, and seals its command set, in one step.
-
-The command-line tool, the runtime's harness engine and the agent change in this release (Steps 2, 3
-and 4, then start and verify in Step 8). The workspace (r34), the router and the second engine binary
-(`mindmapchat`) are carried forward unchanged — Step 5 can be skipped.
 
 ### Earlier: what r27 added
 
