@@ -7,7 +7,36 @@ installation, see [INSTALL.md](INSTALL.md).
 
 ---
 
-## What this release adds (harness engine r40, workspace r35, Activate 1.0.67)
+## What this release adds (agent r30, harness engine r41, Activate 1.0.68)
+
+- **Agents talk to each other by name — through a memory.** Every install now has a memory called
+  `connect-to-agent`. Ask your agent "ask `<agent name>` …" and it searches that memory with
+  `"<agent name> <question>"`: the agent is found by name in the FastAgents registry, asked over DDE,
+  and its answer comes back attributed to it. The agent name alone asks it to describe itself.
+  Whether two agents may talk is decided by the rules on BOTH agents — see "Two agents talking to each
+  other" in the docs. API calls stay behind their own memories, exactly as before.
+- **No relaying by default.** When your agent is answering someone else (another agent or an external
+  caller), it does not ask a third agent on their behalf — it says it does not relay, and the caller can
+  ask that agent directly. To allow it on a particular agent:
+  `hexaeight-engine --connector-relay on --root <that agent's harness root>` (`off` / `status` likewise).
+  The `connect-to-agent` memory is kept exactly as shipped: an edited copy is restored at the next turn.
+- **One conversation per chat (agent r30).** A new chat opens a new conversation with the other agent;
+  follow-ups in the same chat continue it. The chat's own id never leaves your machine.
+- **An agent can serve an API door beside its normal one (agent r30).** An agent with the `api`
+  capability registers its API URL separately; a name lookup still returns the normal door unless the
+  API one is asked for.
+- **Framework runners (bundles crewai v3; langgraph, pydanticai, agno v2).** Each runner has
+  `connect-to-agent` built in, with the same no-relay rule. Re-install with
+  `hexaeight-activate enable <framework> --force` from the agent's (or the runner's) folder.
+- **An agent answering another agent receives the question itself (engine r41).** The runner's direct
+  mission used to receive the caller's envelope when the caller was an agent rather than a person.
+- **`add-runner` checks for an agent binary before creating anything (Activate 1.0.68).**
+
+The command-line tool, the agent and the harness engine change in this release (Steps 2, 3 and 4, then
+start and verify in Step 8). The workspace (r35), the router and the second engine binary
+(`mindmapchat`) are unchanged.
+
+### Earlier: what r40 added (harness engine r40, workspace r35, Activate 1.0.67)
 
 - **Four agent frameworks as sealed missions.** `hexaeight-activate enable crewai`, `enable langgraph`,
   `enable pydanticai` and `enable agno` each install a pinned environment, the verified mission and its

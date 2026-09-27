@@ -54,7 +54,7 @@ def service_call(peer, api, path, body, capability="", peer_url=""):
     return mcp_tool("service_call", args)
 
 
-def mcp_tool(name, args):
+def mcp_tool(name, args, timeout=90):
     """One call to the agent's MCP server, with this turn's ticket. The agent decides; we only ask."""
     server = _mcp()
     if server is None:
@@ -64,7 +64,7 @@ def mcp_tool(name, args):
                                  data=json.dumps({"jsonrpc": "2.0", "id": next(_ids), "method": "tools/call",
                                                   "params": {"name": name, "arguments": args}}).encode())
     try:
-        with urllib.request.urlopen(req, timeout=90) as r:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
             node = json.loads(r.read())
     except urllib.error.HTTPError as e:
         return {"error": f"MCP returned HTTP {e.code}"}
@@ -77,6 +77,38 @@ def mcp_tool(name, args):
         return json.loads(text)
     except Exception:
         return {"text": text}
+
+
+CONNECTOR = "connect-to-agent"
+CONNECTOR_ABOUT = ("Talk to ANOTHER agent by its name: memory_search(\"connect-to-agent\", \"<agent name> <question>\") "
+                   "asks that agent and returns its answer. Agent name alone: it describes what it can do. "
+                   "Only for this agent's own user: when you are answering another agent or an external caller, "
+                   "do not use it - say you do not relay requests to other agents.")
+
+
+def ask_agent(query):
+    """connect-to-agent: "<agent> <question>". The agent asks the peer by name (registry + DDE); both
+    agents' policies decide whether it may. Same call the harness makes (ServiceCallClient.Ask)."""
+    agent, _, question = query.strip().partition(" ")
+    agent, question = agent.strip().rstrip(":|,"), question.strip().lstrip(":|,-").strip()
+    if not agent:
+        return f"{CONNECTOR}: the query is \"<agent name> <question>\""
+    question = question or "Describe yourself in a few lines: what you can answer or do, and what to ask you."
+    # FOR ITSELF, OR FOR SOMEONE ELSE? An "ext-" work session exists only when the external door opened it:
+    # this turn serves another party, and asking a third agent would make this agent their intermediary.
+    # The connect-to-agent memory's own "relay" setting decides (memories/connect-to-agent/remote.json);
+    # absent means no.
+    if os.environ.get("HEIA_WORK_SESSION", "").startswith("ext-") and (_pointer(CONNECTOR) or {}).get("relay") is not True:
+        return (f"NOT ASKED: this request came from someone else (an external caller), and {CONNECTOR} is set not "
+                f"to contact other agents on anyone else's behalf. Tell the caller you do not relay requests to "
+                f"other agents - they can ask '{agent}' directly. Do not retry, and do not answer for {agent}.")
+    ans = mcp_tool("service_call", {"peer": agent, "body": {"question": question}}, timeout=300)
+    if "error" in ans:
+        return (f"agent '{agent}' did not answer ({ans['error']}). Do not invent its answer; if this is a "
+                f"policy refusal, rewording will not help.")
+    if not ans.get("answer"):
+        return f"agent '{agent}' returned no answer ({ans.get('note', 'empty reply')})"
+    return f"Answer from agent '{agent}':\n{ans['answer']}"
 
 
 def _pointer(name):
@@ -97,6 +129,8 @@ def search_memory(name, query, top_k=5):
 
 def _search_memory(name, query, top_k=5):
     p = _pointer(name)
+    if name == CONNECTOR or (p and p.get("kind") == "connector"):
+        return ask_agent(query)
     if p:   # served memory: the same call the harness makes (ServiceCallClient.Search)
         ans = service_call(p["agent"], p["api"], p.get("path") or "/heia/search",
                            {"query": query, "topK": top_k, "name": p.get("remote", name)},
@@ -119,8 +153,9 @@ def _search_memory(name, query, top_k=5):
 
 
 def memories():
-    out, mdir = [], os.path.join(HARNESS_ROOT, "memories")
+    out, mdir = [{"name": CONNECTOR, "kind": "agents", "about": CONNECTOR_ABOUT}], os.path.join(HARNESS_ROOT, "memories")
     for n in sorted(os.listdir(mdir)) if os.path.isdir(mdir) else []:
+        if n == CONNECTOR: continue
         p = _pointer(n)
         if p:
             out.append({"name": n, "kind": "served", "about": p.get("description", "")[:200]})
@@ -146,7 +181,7 @@ def instructions():
     return ("You are a helpful general assistant. Answer general knowledge, arithmetic, writing and conversation "
             "directly from what you know - no tool needed and never refuse those. Tools are ONLY for things you "
             "cannot know yourself: current weather (weather), current news (bbc_news), this machine's documents "
-            "(list_memories, then memory_search), and who the user is talking to (who_am_i). When a fact comes "
+            "(list_memories, then memory_search), another agent (memory_search('connect-to-agent', '<agent name> <question>') - report its reply as THAT agent's answer), and who the user is talking to (who_am_i). When a fact comes "
             "from a tool, name the source. LIVE DATA IS NEVER REMEMBERED: for weather or news, call the tool "
             "again on EVERY request, even if the same question was answered earlier in this conversation, and "
             "report only what it returns this time. If the tool fails or returns nothing, say so - never fill "

@@ -31,42 +31,42 @@
   ],
   "agent": {
     "repo": "HexaEightTeam/hbia-agent",
-    "tag": "v2026.09.27-r29",
+    "tag": "v2026.09.27-r30",
     "assets": {
       "win-x64": {
         "file": "hexaeight-agent-win-x64.exe",
-        "sha256": "1EA30E34451B90B836F0AD60A13B106FA6EB629810F627C42DF5536AB9034940",
-        "protection": "734B36DC220022DAB1683B9A42C8435B0A107F5C7D33CF963AD46FD3E2A1DEC4847FEA62F39AD5A875B49B8AD94FFDB4DB3E09EEE376066B82A0D5E4C42347E2"
+        "sha256": "A16202E11E4AE72FBAF0338D0794F234EE2FBC92ED8D577AB8E2A57D6FE77929",
+        "protection": "E2502AF66FE25E057A0AD0BAAB932EF11D346B76648DBA0C2BAC340F1CDA5DC6605EFB2012F5DF11CC91ADEFBAB0A6E55B3D5FCC964E47B64C383160310DA288"
       },
       "linux-x64": {
         "file": "hexaeight-agent-linux-x64",
-        "sha256": "922077EAD5276622A5328FB0596F9DE694515CE61C67986F612382A12B746A11",
-        "protection": "CECB0D025E5CC97E177CEA483CBBC12760C88254E5FFE86A8EEE2704E3E49A3C2B66AF4C6E09C649E5844AF2333E67CAF06B52F1C4B2CBB912CD573B87AD94C3"
+        "sha256": "F6091BE9DC91A9FBD59F0C878602485D789330243A8F8C55BA641ADEAB454F12",
+        "protection": "75F66CB07BDCB1E6D73DD4DD62B34025F536A3AD8A7E6C80945F30F1DE804C8963E50A43F8DD590265EFA9B02B978B7A737963F1D7C9CA493BB0771325758469"
       },
       "osx-arm64": {
         "file": "hexaeight-agent-osx-arm64",
-        "sha256": "080F4806AF5A50E332E62EDBD6CD79653C0FCA618A62BF8CAF629F5DD8D4D2FB",
-        "protection": "FECF84C43C0FF5285510FCFCEB8C93CB6726916EB0F5410C1E8E1238D09782F5BA7FB48F56442A7210A223716075CF860F4F9A470887AB052E4FE0B021E9A044"
+        "sha256": "5960978FDBB016C4ECDCD9B8F803BA2AB784E740B6B0F08DD7DD0A080BF78E91",
+        "protection": "28F170476B968DDF7A048D666CAB578D1EE46B9FF75DC5B54106B9F9C97C4E656CF09FAD741CE1B02080A5E7077033B0F253DE389548FEFFFE97310B4622A5DF"
       }
     }
   },
   "engine-harness": {
     "repo": "HexaEightTeam/hbia-agent",
-    "tag": "v2026.09.27-r40",
+    "tag": "v2026.09.27-r41",
     "assets": {
       "win-x64": {
         "file": "hexaeight-engine-win-x64.exe",
-        "sha256": "A31AECBA8E0274201C1461AE995A62F17BC15DC6F490ED59DFF2930B40ADE28F",
+        "sha256": "7A7395E25819E6B6957340214637905F6AE211880C6CDD90B91BD7B3A24E5C09",
         "protection": ""
       },
       "linux-x64": {
         "file": "hexaeight-engine-linux-x64",
-        "sha256": "B48507FEF1DA6672E96202EBF40DB5D9BEFC092570461BF249CDEBB2AFEDEF1E",
+        "sha256": "7B0A7CABBDA9342A0196D1FCECB36418E4766E1AADCE955241DC714AC719E012",
         "protection": ""
       },
       "osx-arm64": {
         "file": "hexaeight-engine-osx-arm64",
-        "sha256": "3A7B3977922A07CDC82AD05FB179FEC1DFC84F83B685FA3FAF0E7BB83D08C1E9",
+        "sha256": "92DED9AC8D5C6EDD9F55B6B5E64FEE7D637AB4735BF9113336C65139C3C72E98",
         "protection": ""
       }
     }
@@ -126,44 +126,44 @@
   },
   "integration-crewai": {
     "repo": "HexaEightTeam/hbia-agent",
-    "tag": "integration-crewai-v2",
+    "tag": "integration-crewai-v3",
     "assets": {
       "any": {
         "file": "mission-CrewAI_v1_Runner.zip",
-        "sha256": "9D84646C3B96F7792C2F7A61D8142355C3D888DA5A0DBF7D7B889A6FFDC8529B",
+        "sha256": "279F5F7E490A5B24860F7B4EB678A9D851397F4EBDB2EEE5704D0D93EEB1CFFC",
         "protection": ""
       }
     }
   },
   "integration-langgraph": {
     "repo": "HexaEightTeam/hbia-agent",
-    "tag": "integration-langgraph-v1",
+    "tag": "integration-langgraph-v2",
     "assets": {
       "any": {
         "file": "mission-LangGraph_v1_Runner.zip",
-        "sha256": "729A4A2B9B9EDC575AD4C46076A4DCD112B1BC051CFCE33F957B67F11C58FDAC",
+        "sha256": "C0B875A9E391EFDD9DEEBA26A1034EC50455395EB205843C8137051A695747E1",
         "protection": ""
       }
     }
   },
   "integration-pydanticai": {
     "repo": "HexaEightTeam/hbia-agent",
-    "tag": "integration-pydanticai-v1",
+    "tag": "integration-pydanticai-v2",
     "assets": {
       "any": {
         "file": "mission-PydanticAI_v1_Runner.zip",
-        "sha256": "B14A697539E1E42E32B12D6C893A607F1F9B93D5D65B1DFCA41028BF41398771",
+        "sha256": "C1350A33670B8584B1A94B14D785E6D63E6658BCBEC805576077789FF5FE2DE8",
         "protection": ""
       }
     }
   },
   "integration-agno": {
     "repo": "HexaEightTeam/hbia-agent",
-    "tag": "integration-agno-v1",
+    "tag": "integration-agno-v2",
     "assets": {
       "any": {
         "file": "mission-Agno_v1_Runner.zip",
-        "sha256": "F81FB7A1AA95682FA13B865FB3A7420F523D34A2A2302A46B97AFED6D4A0926F",
+        "sha256": "D668DA95529950438A5FD77D6474FA5B70D7292514684753015B9AD821BCB310",
         "protection": ""
       }
     }

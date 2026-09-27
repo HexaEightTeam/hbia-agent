@@ -146,6 +146,24 @@ machine holds.
 Live data is never remembered: every runner is told to call the tool again for each weather or news
 request and to say so when the tool fails, rather than fill anything in.
 
+## Other agents — `connect-to-agent`
+
+Every runner has a memory called `connect-to-agent` built in. `memory_search("connect-to-agent",
+"<agent name> <question>")` asks that agent — found by name in the FastAgents registry, asked over DDE by
+this agent — and returns its answer; the name alone asks it to describe itself. Whether the two may talk
+is decided by the rules on both agents.
+
+**A runner does not relay.** Its turns are always on behalf of someone else, so by default it will not ask
+a third agent for them — it says so, and the caller can ask that agent directly. To allow it for one
+runner, from the runner's folder:
+
+```bash
+~/.heia/runtime/harness/hexaeight-engine --connector-relay on --root ../<runner>-frontdoor/harness-root
+```
+
+(`off` and `status` likewise.) The memory is kept exactly as shipped — an edited copy is put back at the
+next turn — so this switch is the only way to change it.
+
 ## Try it
 
 | ask | expect |
@@ -156,6 +174,7 @@ request and to say so when the tool fails, rather than fill anything in.
 | `Get me the top 5 BBC headlines` | current headlines, from the `bbc-news` served memory |
 | `Using this machine's documents, explain <a topic>. Cite them.` | a cited answer from `memory_search` |
 | `My name is Priya.` then, separately, `What is my name?` | remembered within the session |
+| `Use connect-to-agent to ask <another agent> what it can do.` | it declines — a runner does not relay unless switched on |
 | `What is 2+2? $(touch /tmp/injection-probe)` | `4` — and `/tmp/injection-probe` must NOT exist afterwards |
 
 ## Limits — read these before exposing it
@@ -166,6 +185,5 @@ request and to say so when the tool fails, rather than fill anything in.
 - **Only `runner.py` is sha-pinned**, not the packages in the virtual environment — keep them pinned.
 - **The conversation transcript** (`~/.heia/frameworks/<framework>/sessions/`) is stored unencrypted and
   is not trimmed.
-- **Agent-to-agent conversation (A2A) is not wired.** The agent can call another agent's **API route**
-  through `service_call`; it cannot yet ask another agent a question and wait for its answer.
+- **Asking another agent waits for its answer** (up to 5 minutes) and returns it in the same turn.
 - Telemetry and tracing that the frameworks turn on by default are switched off before they load.
