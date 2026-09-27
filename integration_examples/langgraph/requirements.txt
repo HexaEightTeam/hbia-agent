@@ -1,0 +1,4 @@
+# Verified with Python 3.12
+langgraph==1.2.12
+langchain-anthropic==1.7.4
+anthropic==1.8.0
