@@ -7,7 +7,7 @@ installation, see [INSTALL.md](INSTALL.md).
 
 ---
 
-## What this release adds (harness engine r39, workspace r35, Activate 1.0.67)
+## What this release adds (harness engine r40, workspace r35, Activate 1.0.67)
 
 - **Four agent frameworks as sealed missions.** `hexaeight-activate enable crewai`, `enable langgraph`,
   `enable pydanticai` and `enable agno` each install a pinned environment, the verified mission and its
@@ -21,6 +21,15 @@ installation, see [INSTALL.md](INSTALL.md).
 - **CrewAI moves to its v2 bundle.** Same mission name, now on the shared card with `runner.py`. If you
   installed it with 1.0.66, run `hexaeight-activate enable crewai --force` from your agent's folder; the
   v1 mission is kept under `~/.hexaeight-harness/backups/`.
+- **Runners serve a framework to external callers — and see only what you export (engine r40,
+  Activate 1.0.67).** `add-runner` then `enable <framework>` in the runner's folder puts the framework
+  behind a BYOA front door. A runner now sees only its own mission until you export a memory into it
+  with `hexaeight-activate runner-memory --share <name>` (served: the pointer; local: linked, or
+  `--copy`). Each caller session gets its own working folder, the runner's external callers can use
+  `who_am_i`, and the engine hands a runner's direct mission the caller's question rather than its
+  envelope. `restart agent` in a runner folder gives it its own store.
+  **A runner you created before 1.0.67 still sees the workspace's memories** — re-create it with
+  `add-runner`, or copy the new wrapper into its `-frontdoor` folder, then share only what it needs.
 
 The command-line tool, the runtime's harness engine and the workspace change in this release (Steps 2,
 3 and 5, then start and verify in Step 8). The agent (r29), the router and the second engine binary
