@@ -7,7 +7,34 @@ installation, see [INSTALL.md](INSTALL.md).
 
 ---
 
-## What this release adds (agent r30, harness engine r41, Activate 1.0.68)
+## What this release adds (agent r31, harness engine r42, workspace r36, Activate 1.0.69)
+
+- **Machines: operate your servers from the workspace (agent r31).** The agent's owner can add a server
+  over SSH (a key or a username and password, tested first and then sealed under the agent's own key),
+  survey it and open a chat bound to it. The chat proposes commands; **every command waits for your
+  Approve or Deny** in the right-hand pane, runs streamed there, and moves to the background after two
+  minutes. A **Terminal** button opens your own shell on the machine for the steps that are yours — the
+  licence (`hexaeight-activate newtoken`), sudo prompts — and nothing typed there reaches the chat or a
+  log. Off unless switched on: add `"fleet": { "enabled": true }` to `hexaeight-agent.json` and restart
+  the agent. Owner only: it also needs `hexaeight-agent.json` to name exactly one owner email.
+- **Status, API and policy cards (harness engine r42).** A machine chat answers with cards built from a
+  fixed read-only survey: every HexaEight folder with its kind, release, port and registration; each API
+  route with its service and what it serves; the agent's inbound and outbound policies. Cards end with
+  ready-made next questions you can click. A fresh machine shows what to install and asks first.
+- **A machine chat can only act on its machine (harness engine r42).** Its engine has no local shell or
+  file tools; everything goes through the approved machine commands.
+- **The workspace is organised by job (workspace r36).** Chat, Coding, Missions, Mission Runner, Memory
+  and Machines each list only their own sessions, and a session always opens in its own section. Each
+  section shows its goal and steps; Mission Runner opens without the flowchart pane.
+- **The documentation ships as a memory (Activate 1.0.69).** `install-workspace` indexes the docs, the
+  install procedure and the machine guide into a `hexaeight-docs` memory; `hexaeight-activate
+  docs-memory` refreshes it.
+
+The command-line tool, the agent, the harness engine and the workspace change in this release (Steps 2–5,
+then start and verify in Step 8). The workspace's shared worker changed: close every workspace tab after
+upgrading and sign in again. The router and the second engine binary (`mindmapchat`) are unchanged.
+
+### Earlier: what r30 added (agent r30, harness engine r41, Activate 1.0.68)
 
 - **Agents talk to each other by name — through a memory.** Every install now has a memory called
   `connect-to-agent`. Ask your agent "ask `<agent name>` …" and it searches that memory with
@@ -31,10 +58,6 @@ installation, see [INSTALL.md](INSTALL.md).
 - **An agent answering another agent receives the question itself (engine r41).** The runner's direct
   mission used to receive the caller's envelope when the caller was an agent rather than a person.
 - **`add-runner` checks for an agent binary before creating anything (Activate 1.0.68).**
-
-The command-line tool, the agent and the harness engine change in this release (Steps 2, 3 and 4, then
-start and verify in Step 8). The workspace (r35), the router and the second engine binary
-(`mindmapchat`) are unchanged.
 
 ### Earlier: what r40 added (harness engine r40, workspace r35, Activate 1.0.67)
 
