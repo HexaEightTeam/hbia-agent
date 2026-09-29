@@ -14,6 +14,19 @@ release**, then tells you what it updated. The manual steps below remain for ins
 
 ---
 
+## What this release adds (router r9)
+
+- **The router no longer needs to know an agent's customers.** An agent can decline to name the callers it
+  answers for (`"external": { "opaqueCallers": true }` in its `hexaeight-agent.json`); the router then counts
+  the session as the agent's own. That was refused on every router with a policy, so the only way through was
+  to add each calling agent to the router. Fixed: an opaque session is checked as the agent itself — the rule
+  that already admits the agent. Named callers, users and a router with `requireIdentifiedCaller: true` behave
+  exactly as before.
+- Nothing else changes: agent r33, harness engine r42 and workspace r37 stay as they are.
+
+Upgrade: re-run the one-command installer (it updates only the router), or
+`cd <router folder> && hexaeight-activate install-router --dir .` and restart the router, then the agent.
+
 ## What this release adds (agent r33)
 
 - **Answering other agents is opt-in, and free when not set up.** Another agent's question becomes an engine turn only

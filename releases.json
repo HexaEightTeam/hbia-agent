@@ -102,21 +102,26 @@
   },
   "router": {
     "repo": "HexaEightTeam/hbia-router",
-    "tag": "v2026.09.12-r8",
+    "tag": "v2026.09.29-r9",
+    "older": {
+      "4B8966F397315A3A034019E41CD3261B1323C0EC7C205FF8F3CDEDA1EDD1B6B5": "router r8 win-x64",
+      "63D752803DE4B15B43039C8FB52D331A2B38958258B40C18289A59BE18C9A0F5": "router r8 linux-x64",
+      "4D95323D64A0EEAEA4717F29357A193D4E195B2AAF2649CF5CDC2115423C55A0": "router r8 osx-arm64"
+    },
     "assets": {
       "win-x64": {
         "file": "hexaeight-router-win-x64.exe",
-        "sha256": "4B8966F397315A3A034019E41CD3261B1323C0EC7C205FF8F3CDEDA1EDD1B6B5",
+        "sha256": "89D4AE5C3CD08E9BCF1453BC0A04BE064E8D3851D6847FD8092359181EC184A6",
         "protection": ""
       },
       "linux-x64": {
         "file": "hexaeight-router-linux-x64",
-        "sha256": "63D752803DE4B15B43039C8FB52D331A2B38958258B40C18289A59BE18C9A0F5",
+        "sha256": "537601F787E53DEC942FECA2BAE20EFFAFC6A492AB7604240E22C78268C207C5",
         "protection": ""
       },
       "osx-arm64": {
         "file": "hexaeight-router-osx-arm64",
-        "sha256": "4D95323D64A0EEAEA4717F29357A193D4E195B2AAF2649CF5CDC2115423C55A0",
+        "sha256": "6D99BCFC4229466AB7F527474B87710E9E3DBF6856DD19AE77516BE54E18C374",
         "protection": ""
       }
     }
