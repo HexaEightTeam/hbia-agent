@@ -17,17 +17,37 @@
 # workspace behind an HTTPS tunnel. To keep everything on this machine only:
 #
 #     curl -fsSL …/install.sh | bash -s -- --skip-gateway
+#
+# AN EXTERNAL AGENT — one that other agents ask, and that answers with ONE mission: an exported
+# mission zip, or a framework runner (crewai, langgraph, pydanticai, agno). --allow names an agent
+# that may ask it (repeat it for more):
+#
+#     curl -fsSL …/install.sh | bash -s -- --add-external ~/Downloads/mission-<name>.zip --allow <agent>
+#     curl -fsSL …/install.sh | bash -s -- --add-external crewai --allow <agent>
+#
+# On a NEW machine that installs only what such an agent needs — the licence, the router, the agent,
+# its policy and its public address; no workspace. On a machine already installed it adds the mission
+# and changes nothing else. The mission lives in ~/heia-agent-external, in its own store.
 # ──────────────────────────────────────────────────────────────────────────────────────────────────
 set -u
 
 SKIP_GATEWAY=0
-for arg in "$@"; do
-  case "$arg" in
-    --skip-gateway) SKIP_GATEWAY=1 ;;
-    -h|--help) sed -n '2,20p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) printf '  unknown option: %s  (known: --skip-gateway)\n' "$arg"; exit 1 ;;
+ADD_EXTERNAL=""
+ALLOW=""
+ARGS_TEXT=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --skip-gateway) SKIP_GATEWAY=1; ARGS_TEXT="$ARGS_TEXT --skip-gateway" ;;
+    --add-external) ADD_EXTERNAL="${2:-}"; [ -n "$ADD_EXTERNAL" ] || { printf '  --add-external needs a mission zip or a framework (crewai, langgraph, pydanticai, agno)\n'; exit 1; }
+                    ARGS_TEXT="$ARGS_TEXT --add-external $ADD_EXTERNAL"; shift ;;
+    --allow)        [ -n "${2:-}" ] || { printf '  --allow needs an agent name\n'; exit 1; }
+                    ALLOW="$ALLOW $2"; ARGS_TEXT="$ARGS_TEXT --allow $2"; shift ;;
+    -h|--help) sed -n '2,32p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) printf '  unknown option: %s  (known: --skip-gateway, --add-external <mission.zip|framework>, --allow <agent>)\n' "$1"; exit 1 ;;
   esac
+  shift
 done
+[ -n "$ALLOW" ] && [ -z "$ADD_EXTERNAL" ] && { printf '  --allow goes with --add-external\n'; exit 1; }
 
 LIC="$HOME/hbia-agent"        # the licence: env-file + hexaeight.mac, nothing else. Never move it.
 ROUTER="$HOME/heia-router"
@@ -123,6 +143,207 @@ link_licence() {
   ok "licence hardlinked into $d (same inode)"
 }
 wait_port() { local p="$1" i; for i in $(seq 1 "${2:-60}"); do listening "$p" && return 0; sleep 1; done; return 1; }
+
+# ══ --add-external — AN AGENT THAT OTHER AGENTS ASK, answering with ONE mission ═══════════════════
+# Without it an agent answers another agent's question with a fixed "no capability" reply (no model,
+# no cost). With it, the question runs the mission: an exported mission zip, or a framework runner.
+#
+# THE LAYOUT, and why each part is where it is:
+#   ~/heia-agent-external/mission-runner.sh   the front-door wrapper — the one Activate's add-runner writes,
+#                                              pinned by hash. It imposes the sealed mission whatever the
+#                                              caller writes. OUTSIDE the agent folder: the engine jail
+#                                              masks that folder, and a script kept there does not exist.
+#   ~/heia-agent-external/harness-root/       the door's OWN store — the mission and the memories its
+#                                              cards search. A caller never touches the workspace's.
+#   NOT ~/heia-agent-frontdoor: Activate treats a folder with <agent>-frontdoor/mission-runner.sh beside it
+#   as a runner and starts it with a separate HEIA_DIR — the main agent would lose its own store.
+#
+# OPAQUE CALLERS. The router is told nothing about who asks: the session is the agent's own, so the
+# router needs no rule for this agent's customers (and a router run by someone else never sees them).
+FRAMEWORKS="crewai langgraph pydanticai agno"
+fw_mission() {
+  case "$1" in crewai) echo CrewAI_v1_Runner ;; langgraph) echo LangGraph_v1_Runner ;;
+               pydanticai) echo PydanticAI_v1_Runner ;; agno) echo Agno_v1_Runner ;; *) echo "" ;; esac
+}
+external_door() {
+  export DOTNET_ROOT="$HOME/.dotnet"
+  export PATH="$HOME/.dotnet:$HOME/.dotnet/tools:$HOME/.heia/bin:$PATH"
+  local DOOR="$AGENT-external" CFG="$AGENT/hexaeight-agent.json" WSMEM="$HOME/.hexaeight-harness/memories"
+  local NODE="$HOME/.heia/runtime/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node || true)"
+  local WRAP_URL="https://raw.githubusercontent.com/HexaEightTeam/hbia-agent/main/frontdoor/mission-runner.sh"
+  local WRAP_SHA="82F13AB31D6009948ED6B95A93B5807EC53131B130675B4EAE4D7BE90788BC29"
+  local LOG=/tmp/heia-add-external.log
+  local SRC="$ADD_EXTERNAL" FW MISSION ZIP MODEL ROUTE ROUTER_ID LNAME GLOB RT NEED MISSING="" PEERS="" m f a p
+  door_sha() {
+    if [ "$OS" = "Darwin" ]; then shasum -a 256 "$1" 2>/dev/null | awk '{print toupper($1)}'
+    else sha256sum "$1" 2>/dev/null | awk '{print toupper($1)}'; fi
+  }
+  : > "$LOG"
+
+  step "External agent — other agents ask it; it answers with one mission"
+  [ -f "$AGENT/$ABIN" ] && [ -f "$CFG" ] || die "no agent installed in $AGENT"
+  [ -n "$NODE" ] || die "no node runtime found (~/.heia/runtime/node)"
+  command -v hexaeight-activate > /dev/null 2>&1 || die "hexaeight-activate not found"
+  LNAME="$(cd "$LIC" && activate verify-license 2>&1 | sed -n 's/^ *Identity: *//p' | head -1)"
+  [ -n "$LNAME" ] || die "the licence in $LIC does not verify — run: cd $LIC && hexaeight-activate verify-license"
+
+  # The model route the install sealed its engines with, found the way the install finds it: its own
+  # router (the licence's name on :5100, the first anthropic route in upstreams.yaml), or the remote one
+  # it recorded. (In the own-router case the state's "router" key is the router's release tag.)
+  MODEL="$(state_get model)"
+  if [ "$(state_get router_mode)" = remote ]; then
+    ROUTER_ID="$(state_get router)"; ROUTE="$(state_get route)"
+  else
+    GLOB="$(awk '/^[[:space:]]*- match:/{gsub(/.*match: *"|".*/,"");m=$0} /^[[:space:]]*shape: *"anthropic"/{print m; exit}' "$ROUTER/upstreams.yaml" 2>/dev/null)"
+    ROUTE="${GLOB//\*/heia}"; ROUTER_ID="$LNAME|http://127.0.0.1:5100"
+    # Opaque callers need router r9 or later; an older one refuses every one of them. Judged by the FILE
+    # (its hash against the published releases), not by what this installer last recorded.
+    RT="$(state_get router)"
+    case "$RT" in v20*) if [[ "$RT" < "v2026.09.29-r9" ]]; then
+      local RSHA PUB
+      RSHA="$(door_sha "$ROUTER/$RBIN")"
+      PUB="$(curl -fsSL --max-time 20 https://raw.githubusercontent.com/HexaEightTeam/hbia-agent/main/releases.json 2>/dev/null \
+             | awk -v r="\"$PLAT\":" '$1=="\"router\":"{inc=1} inc && $1==r{inr=1} inr && index($0,"\"sha256\":"){s=$0; sub(/^[^:]*: *"/,"",s); sub(/".*/,"",s); print s; exit}')"
+      [ -n "$PUB" ] && [ "$RSHA" = "$PUB" ] || \
+        warn "the router here is $RT — other agents' questions need router r9 or later. Re-run this installer without options first (it updates only what moved)."
+    fi ;; esac
+  fi
+  [ -n "$ROUTE" ] && [ -n "$MODEL" ] || die "could not work out the route and model this install uses — install first"
+  [ -e "$AGENT-frontdoor/mission-runner.sh" ] && \
+    warn "$AGENT-frontdoor/mission-runner.sh exists — Activate treats the agent as a runner beside it and gives it a separate store. Rename that folder."
+
+  # 1. the door folder and the wrapper
+  mkdir -p "$DOOR/harness-root/memories"
+  if [ "$(door_sha "$DOOR/mission-runner.sh")" != "$WRAP_SHA" ]; then
+    curl -fsSL --max-time 30 "$WRAP_URL" -o "$DOOR/mission-runner.sh.new" || die "could not download the front-door wrapper"
+    [ "$(door_sha "$DOOR/mission-runner.sh.new")" = "$WRAP_SHA" ] || die "the downloaded wrapper does not match its published hash — not used"
+    [ -f "$DOOR/mission-runner.sh" ] && mv "$DOOR/mission-runner.sh" "$DOOR/mission-runner.sh.bak_$(date +%Y%m%d_%H%M%S)"
+    mv "$DOOR/mission-runner.sh.new" "$DOOR/mission-runner.sh"
+  fi
+  chmod +x "$DOOR/mission-runner.sh"
+  ok "front door: $DOOR (wrapper verified)"
+
+  # 2. the mission, into the DOOR's store — the workspace's own copy is never touched
+  FW="$(fw_mission "$SRC")"
+  if [ -n "$FW" ]; then
+    # A framework runner: `enable` builds its Python environment, installs the published mission and has
+    # the agent seal the runner's one command; the mission is then copied into the door's store.
+    if ! python3 -c 'import ensurepip' > /dev/null 2>&1 && ! command -v uv > /dev/null 2>&1; then
+      die "$SRC runs in Python and needs a virtual environment. The administrator runs, once:
+      sudo apt-get install -y python3-venv          (Debian / Ubuntu; or install uv: https://docs.astral.sh/uv/)
+  then run this again."
+    fi
+    spin "Installing $SRC — its Python environment and its mission (a few minutes)"
+    ( cd "$AGENT" && activate enable "$SRC" ) >> "$LOG" 2>&1 || { spin_done; tail -25 "$LOG"; die "enable $SRC failed — see $LOG"; }
+    MISSION="$FW"
+    [ -d "$WSMEM/$MISSION" ] || die "enable $SRC finished, but $WSMEM/$MISSION is not there — see $LOG"
+    if [ -e "$DOOR/harness-root/memories/$MISSION" ]; then ok "mission $MISSION — already in the door's store, kept as it is"
+    else cp -a "$WSMEM/$MISSION" "$DOOR/harness-root/memories/" || die "could not copy $MISSION into the door's store"
+         ok "$SRC installed; mission $MISSION in the door's store"; fi
+  else
+    ZIP="$SRC"; case "$ZIP" in "~/"*) ZIP="$HOME/${ZIP#\~/}" ;; esac
+    [ -f "$ZIP" ] || die "no such file: $ZIP  (give a mission .zip, or one of: $FRAMEWORKS)"
+    spin "Importing the mission into the door's store"
+    activate mission-import --in "$ZIP" --root "$DOOR/harness-root" >> "$LOG" 2>&1 \
+      || { spin_done; cat "$LOG"; die "the mission import failed"; }
+    MISSION="$(sed -n 's/^IMPORT \([^ ]*\) ->.*/\1/p' "$LOG" | head -1)"
+    [ -n "$MISSION" ] || { cat "$LOG"; die "could not read the mission name from the import"; }
+    if grep -q 'mission memory exists' "$LOG"; then ok "mission $MISSION — already in the door's store, kept as it is"
+    else ok "mission $MISSION imported into the door's store (with the memories the bundle carries)"; fi
+  fi
+
+  # 3. the memories its cards search ("via: memory: X") — from the bundle, else from this machine's
+  #    workspace store: a served memory's pointer is copied, a local one linked. A framework runner's
+  #    tools look for served memories named weather and bbc-news; they are shared when they exist here.
+  NEED="$( { sed -n 's/.*via: *"memory: *\([^"]*\)".*/\1/p' "$DOOR/harness-root/memories/$MISSION/sources/"*.md 2>/dev/null
+             sed -n 's/.*NEEDS data memory (not bundled): *//p' "$LOG"; } | tr -d ' \r' | sort -u)"
+  for m in $NEED $( [ -n "$FW" ] && echo weather bbc-news ); do
+    [ "$m" = "$MISSION" ] && continue
+    if [ -e "$DOOR/harness-root/memories/$m" ]; then ok "memory $m — in the door's store"
+    elif [ -f "$WSMEM/$m/remote.json" ]; then
+      mkdir -p "$DOOR/harness-root/memories/$m" && cp -p "$WSMEM/$m/remote.json" "$DOOR/harness-root/memories/$m/" \
+        && ok "memory $m — served; its pointer copied into the door"
+    elif [ -d "$WSMEM/$m" ]; then
+      ln -s "$WSMEM/$m" "$DOOR/harness-root/memories/$m" && ok "memory $m — local; linked into the door (no copy)"
+    elif [ -n "$FW" ] && { [ "$m" = weather ] || [ "$m" = bbc-news ]; }; then
+      note "memory $m — not on this machine; the runner's $m tool will say so when asked"
+    else
+      warn "memory $m — not in the bundle and not on this machine"; MISSING="$MISSING $m"
+    fi
+  done
+
+  # 4. the agents its served memories live on: this agent may call them (outbound, one row each)
+  for f in "$DOOR"/harness-root/memories/*/remote.json; do
+    [ -f "$f" ] || continue
+    p="$("$NODE" -e 'try { const d = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); process.stdout.write(d.agent || ""); } catch (e) {}' "$f")"
+    [ -n "$p" ] || continue
+    case " $PEERS " in *" $p "*) continue ;; esac
+    PEERS="$PEERS $p"
+    if ( cd "$AGENT" && activate add-policy --principal '*' --object "$p" --direction outbound ) >> "$LOG" 2>&1
+    then ok "may call $p (it serves the memory $(basename "$(dirname "$f")"))"
+    else warn "could not add the outbound rule for $p — see $LOG"; fi
+  done
+
+  # 5. who may ask
+  for a in $ALLOW; do
+    if ( cd "$AGENT" && activate add-policy --principal "$a" ) >> "$LOG" 2>&1; then ok "$a may ask this agent"
+    else warn "could not allow $a — see $LOG"; fi
+  done
+
+  # 6. the engine, pinned to this ONE mission, running through the wrapper
+  spin "Sealing the door's engine to $MISSION"
+  activate engine --add runmission --name missionrun-external --mission "$MISSION" \
+      --model "$ROUTE|$MODEL" --router "$ROUTER_ID" --dir "$AGENT" --file "$DOOR/mission-runner.sh" \
+      >> "$LOG" 2>&1 || { spin_done; tail -20 "$LOG"; die "could not seal the door's engine — see $LOG"; }
+  ok "engine missionrun-external sealed to $MISSION ($ROUTE|$MODEL)"
+
+  # 7. the agent's door for other agents -> that engine; callers not disclosed to the router
+  cp -p "$CFG" "$CFG.bak_$(date +%Y%m%d_%H%M%S)"
+  "$NODE" -e '
+    const fs = require("fs"), p = process.argv[1], d = JSON.parse(fs.readFileSync(p, "utf8"));
+    d.external = Object.assign({}, d.external, {
+      engine: "missionrun-external",
+      allowTools: "service_call,who_am_i",   // served memories and API routes are reached through service_call
+      authTiers: "dde-auth,byoa",            // dde-auth: another agent asking; byoa: a backend for a person
+      opaqueCallers: true,                   // the router is not told who asks: the session is the agent own
+    });
+    fs.writeFileSync(p, JSON.stringify(d, null, 2) + "\n");' "$CFG" || die "could not update $CFG"
+  ok "door for other agents -> missionrun-external (callers not disclosed to the router)"
+
+  # 8. one restart, through whatever owns the agent (systemd / launchd via heia; else Activate)
+  spin "Restarting the agent"
+  if command -v heia > /dev/null 2>&1; then heia restart agent >> "$LOG" 2>&1
+  else ( cd "$AGENT" && activate_bg restart agent >> "$LOG" 2>&1 ); fi
+  wait_port 8770 180 || die "the agent did not come back — see $LOG"
+  ok "agent restarted"
+
+  cat <<EOF
+
+  ${B}Other agents can now ask ${LNAME} — each question runs ${MISSION}.${N}
+EOF
+  if [ -n "$ALLOW" ]; then printf '  Allowed to ask:%s\n' "$ALLOW"
+  else printf '  Nobody is allowed to ask yet. For each agent:  cd %s && hexaeight-activate add-policy --principal <agent>\n' "$AGENT"; fi
+  cat <<EOF
+  On each agent that asks (once):
+      hexaeight-activate add-policy --principal '*' --object ${LNAME} --direction outbound
+EOF
+  for p in $PEERS; do
+    printf '  On %s (it serves a memory this mission searches), once:\n      hexaeight-activate add-policy --principal %s\n' "$p" "$LNAME"
+  done
+  [ -n "$MISSING" ] && printf '\n  %s!%s Still missing for this mission:%s — it will say so when a card needs one.\n' "$Y" "$N" "$MISSING"
+  printf '\n'
+}
+
+# An agent is already installed here: add the mission and change nothing else.
+EXTERNAL_ONLY=0
+if [ -n "$ADD_EXTERNAL" ]; then
+  if [ -f "$AGENT/$ABIN" ] && [ -f "$AGENT/hexaeight-agent.json" ] && [ -n "$(state_get model)" ]; then
+    printf '\n%sHexaEight — external agent%s\n' "$B" "$N"
+    external_door
+    exit 0
+  fi
+  EXTERNAL_ONLY=1   # a new machine: install only what an external agent needs, then the mission (at the end)
+fi
 
 # ── macOS only: the two steps whose absence looks like a working install in which nothing answers ──
 # 1. A downloaded binary must carry a valid signature or macOS kills it ("Killed: 9", reads as a crash).
@@ -234,8 +455,39 @@ if [ -n "$need" ]; then
 EOF
   exit 0
 fi
+# INSTALLED IS NOT THE SAME AS ABLE TO RUN. Ubuntu 23.10+ can restrict unprivileged user namespaces through
+# AppArmor — Azure's Ubuntu 24.04 image ships with it on (EC2's and WSL's did not) — and bubblewrap then
+# fails on every start ("setting up uid map: Permission denied"). Every engine turn is wrapped in it, so
+# this is caught HERE, before anything is installed, instead of at the sandbox check in step 4 after .NET,
+# the licence and the router. The fix offered is an AppArmor profile that lets bubblewrap ALONE create
+# namespaces: the rest of the machine keeps its hardening. (The sysctl that lifts the restriction does it
+# for every program, and removing bubblewrap leaves engine turns unconfined — neither is suggested.)
+if [ "$OS" = "Linux" ] && ! /usr/bin/bwrap --unshare-user --ro-bind / / true > /dev/null 2>&1; then
+  cat <<EOF
+
+  ${B}The sandbox cannot start on this machine.${N} bubblewrap is installed, but this system restricts the
+  user namespaces it needs — an Ubuntu hardening setting (Azure's Ubuntu images have it on).
+  The machine's administrator runs this once. It allows bubblewrap alone; everything else keeps the setting:
+
+sudo tee /etc/apparmor.d/bwrap > /dev/null <<'PROFILE'
+abi <abi/4.0>,
+include <tunables/global>
+
+profile bwrap /usr/bin/bwrap flags=(unconfined) {
+  userns,
+  include if exists <local/bwrap>
+}
+PROFILE
+sudo apparmor_parser -r /etc/apparmor.d/bwrap
+
+  Check it:  ${B}bwrap --unshare-user --ro-bind / / true && echo sandbox ok${N}
+  Then run this installer again.
+
+EOF
+  exit 0
+fi
 if [ "$OS" = "Darwin" ]; then ok "prerequisites: none needed on macOS (sandbox-exec is built in)"
-else ok "prerequisites present (bubblewrap, libicu)"; fi
+else ok "prerequisites present (bubblewrap, libicu); the sandbox starts"; fi
 
 if ! command -v dotnet >/dev/null || ! dotnet --list-runtimes 2>/dev/null | grep -q "Microsoft.NETCore.App 8\."; then
   spin "Installing .NET 8 into ~/.dotnet"
@@ -278,8 +530,13 @@ if [ ! -f "$LIC/env-file" ] || [ ! -f "$LIC/hexaeight.mac" ]; then
   your PATH. Without it the terminal may find another program of the same name — on WSL, a
   Windows one — and fail. (A new terminal works too.)
   When it says the licence works, run this installer again — it carries on from here.
-
 EOF
+  [ -n "$ARGS_TEXT" ] && cat <<EOF
+  Run it with the same options:
+
+      ${B}curl -fsSL https://raw.githubusercontent.com/HexaEightTeam/hbia-agent/main/install.sh | bash -s --${ARGS_TEXT}${N}
+EOF
+  printf '\n'
   exit 0
 fi
 
@@ -727,7 +984,9 @@ ok "$(grep -o '[0-9]* engine(s) sealed' /tmp/heia-engines.log | tail -1) against
 # /api/incoming and a person who registered their email here (workspace → Messages → "Receive my messages
 # here") still gets nothing. Whether a message is ACCEPTED is still the agent's policy: the sender's agent
 # must be admitted, and the sending person must be allowed to reach the recipient. Set in the config
-# before the agent starts, so no extra restart. ENABLE_INCOMING=0 leaves it off.
+# before the agent starts, so no extra restart. ENABLE_INCOMING=0 leaves it off. An external agent has no
+# workspace for anyone to register in, so there it is off unless asked for.
+if [ "$EXTERNAL_ONLY" = 1 ]; then ENABLE_INCOMING="${ENABLE_INCOMING:-0}"; fi
 if [ "${ENABLE_INCOMING:-1}" = 1 ]; then
   INODE="$HOME/.heia/runtime/node/bin/node"; [ -x "$INODE" ] || INODE="$(command -v node || true)"
   ICFG="$AGENT/hexaeight-agent.json"
@@ -749,20 +1008,29 @@ fi
 # that runs commands directly (--local, no SSH). Edited with the agent's own Node runtime (no python).
 # ON BY DEFAULT (2026-09-29). ENABLE_FLEET=0 skips this step. (It was off for a while when a tunnel
 # failure was blamed on it — the cause was Cloudflare refusing new quick tunnels, not Machines.)
-ENABLE_FLEET="${ENABLE_FLEET:-1}"
+# Machines lives in the workspace, so an external agent (no workspace) has it off unless asked for.
+if [ "$EXTERNAL_ONLY" = 1 ]; then ENABLE_FLEET="${ENABLE_FLEET:-0}"; else ENABLE_FLEET="${ENABLE_FLEET:-1}"; fi
 if [ "$ENABLE_FLEET" = 1 ]; then
 NODE="$HOME/.heia/runtime/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node || true)"
 CFG="$AGENT/hexaeight-agent.json"
 # Read as JSON, not grepped: the config spreads "fleet": { "enabled": true } over several lines.
+# THE TERMINAL (Machines → Terminal) opens only from a page the agent allows. Without "origins" the agent
+# allows :5621 alone, but this installer's workspace is on :5620 — so the terminal was refused on every
+# default install. The workspace's local addresses are added here (kept alongside any already listed).
+WS_ORIGINS='["http://localhost:5620","http://127.0.0.1:5620"]'
 fleet_on() { "$NODE" -e 'const d = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
-                        process.exit(d.fleet && d.fleet.enabled === true ? 0 : 1)' "$CFG" 2>/dev/null; }
+                        const o = (d.fleet && d.fleet.origins) || [];
+                        const ok = d.fleet && d.fleet.enabled === true && JSON.parse(process.argv[2]).every((x) => o.includes(x));
+                        process.exit(ok ? 0 : 1)' "$CFG" "$WS_ORIGINS" 2>/dev/null; }
 if [ -n "$NODE" ] && ! fleet_on; then
   cp -p "$CFG" "$CFG.bak_$(date +%Y%m%d_%H%M%S)"
   "$NODE" -e '
     const fs = require("fs"), p = process.argv[1];
     const d = JSON.parse(fs.readFileSync(p, "utf8"));
-    d.fleet = Object.assign({}, d.fleet, { enabled: true });
-    fs.writeFileSync(p, JSON.stringify(d, null, 2) + "\n");' "$CFG" || die "could not update $CFG"
+    const o = Array.isArray(d.fleet && d.fleet.origins) ? d.fleet.origins : [];
+    for (const x of JSON.parse(process.argv[2])) if (!o.includes(x)) o.push(x);
+    d.fleet = Object.assign({}, d.fleet, { enabled: true, origins: o });
+    fs.writeFileSync(p, JSON.stringify(d, null, 2) + "\n");' "$CFG" "$WS_ORIGINS" || die "could not update $CFG"
 fi
 MACHINE="$(hostname -s 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-\n' '-')"; MACHINE="${MACHINE:-this-machine}"
 if [ "$(state_get fleet_local)" != "$MACHINE" ]; then
@@ -784,6 +1052,10 @@ agent_start "Starting the agent" || die "the agent did not start — see $AGENT/
 ok "agent running on :8770"
 
 # ══ 5 · the workspace ══════════════════════════════════════════════════════════════════════════════
+if [ "$EXTERNAL_ONLY" = 1 ]; then
+  step "5 · Workspace — not installed (an external agent is asked by other agents, not used in a browser)"
+  NODE="$HOME/.heia/runtime/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node || true)"
+else
 step "5 · Workspace"
 WST="$(rel_top workspace tag)"
 if [ ! -f "$HOME/.heia/runtime/workspace/index.html" ]; then
@@ -826,6 +1098,7 @@ fi
 spin "Starting the workspace"
 wait_port 5620 30 || die "the workspace did not start — see ~/.heia/workspace-5620.log"
 ok "workspace on http://localhost:5620"
+fi   # EXTERNAL_ONLY
 
 
 # ══ 6 · the gateway — reachable from anywhere (skip with --skip-gateway) ═══════════════════════════
@@ -878,14 +1151,15 @@ else
   # THE AGENT: publish itself — Cloudflare first, the fastagents.net relay if Cloudflare gives no address,
   # and its workspace (:5620) with it on the relay. Edited with the agent's own Node runtime (no python).
   CFG="$AGENT/hexaeight-agent.json"
+  WSP=5620; [ "$EXTERNAL_ONLY" = 1 ] && WSP=0          # an external agent carries no workspace on the relay
   if ! grep -q '"mode": *"cloudflared"' "$CFG" || ! grep -q '"register": *true' "$CFG" || ! grep -q '"workspacePort"' "$CFG"; then
     cp -p "$CFG" "$CFG.bak_$(date +%Y%m%d_%H%M%S)"
     "$NODE" -e '
-      const fs = require("fs"), [p, bin] = process.argv.slice(1);
+      const fs = require("fs"), [p, bin, wsp] = process.argv.slice(1);
       const d = JSON.parse(fs.readFileSync(p, "utf8"));
-      d.reach = Object.assign({}, d.reach, { mode: "cloudflared", bin, fallback: "fastagents", workspacePort: 5620 });
+      d.reach = Object.assign({}, d.reach, { mode: "cloudflared", bin, fallback: "fastagents", workspacePort: Number(wsp) });
       d.register = true;
-      fs.writeFileSync(p, JSON.stringify(d, null, 2) + "\n");' "$CFG" "$CF" || die "could not update $CFG"
+      fs.writeFileSync(p, JSON.stringify(d, null, 2) + "\n");' "$CFG" "$CF" "$WSP" || die "could not update $CFG"
     agent_start "Restarting the agent so it publishes itself" || die "the agent did not come back — see $AGENT/agent.log"
   fi
   spin "Waiting for the agent's public address"
@@ -907,7 +1181,8 @@ else
   case "$REG" in *OK*) ok "registered as $NAME — other agents find it by name";;
                  *) warn "registration not confirmed yet (it retries): ${REG:-no [register] line yet}";; esac
 
-  # THE WORKSPACE: find the agent by name, served over HTTPS.
+  # THE WORKSPACE: find the agent by name, served over HTTPS. (An external agent has none.)
+  if [ "$EXTERNAL_ONLY" != 1 ]; then
   spin "Pointing the workspace at $NAME"
   ( cd "$AGENT" && activate install-workspace --agent "$NAME" > /tmp/heia-install-workspace-agent.log 2>&1 ) \
     || die "could not point the workspace at $NAME — see /tmp/heia-install-workspace-agent.log"
@@ -939,6 +1214,7 @@ else
     [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 "$WS_URL/")" = "200" ] && break; sleep 3
   done
   ok "workspace reachable at $WS_URL"
+  fi   # EXTERNAL_ONLY
 fi
 
 # THE heia COMMAND — restart, start, stop, status and logs for this machine's services, from any folder,
@@ -1156,7 +1432,7 @@ port_pid() { if [ "$OS" = "Darwin" ]; then lsof -tiTCP:"$1" -sTCP:LISTEN 2>/dev/
 start_ourselves() {   # the fallback: our own detached copies, as during the install
   if [ "$MODE" = own ] && ! listening 5100; then ( cd "$ROUTER" && activate_bg restart router > /tmp/heia-router-start.log 2>&1 ); wait_port 5100 60; fi
   listening 8770 || agent_start "Starting the agent"
-  if ! listening 5620; then
+  if [ "$EXTERNAL_ONLY" != 1 ] && ! listening 5620; then
     if command -v setsid > /dev/null; then ( cd "$WS" && setsid "$NODE" serve.mjs --port 5620 --host 127.0.0.1 > "$HOME/.heia/workspace-5620.log" 2>&1 < /dev/null & )
     else ( cd "$WS" && nohup "$NODE" serve.mjs --port 5620 --host 127.0.0.1 > "$HOME/.heia/workspace-5620.log" 2>&1 < /dev/null & ); fi
     wait_port 5620 30
@@ -1190,7 +1466,7 @@ UNIT_EOF
   if [ "$MODE" = own ]; then ( cd "$AGENT" && activate autostart on --agent "$AGENT" --router "$ROUTER" > /tmp/heia-autostart.log 2>&1 )
   else                     ( cd "$AGENT" && activate autostart on --agent "$AGENT" > /tmp/heia-autostart.log 2>&1 ); fi
   UP=1
-  { [ "$MODE" != own ] || wait_port 5100 90; } && wait_port 8770 150 && wait_port 5620 90 || UP=0
+  { [ "$MODE" != own ] || wait_port 5100 90; } && wait_port 8770 150 && { [ "$EXTERNAL_ONLY" = 1 ] || wait_port 5620 90; } || UP=0
   if [ "$UP" = 1 ]; then
     ok "$MANAGER runs them now — they start at login and come back if they stop"
   else
@@ -1209,7 +1485,7 @@ UNIT_EOF
     launchd) launchctl kickstart -k "gui/$(id -u)/com.hexaeight.agent" > /dev/null 2>&1 ;;
   esac
   sleep 3
-  if wait_port 8770 180 && { listening 5620 || wait_port 5620 60; }; then ok "agent restarted cleanly"
+  if wait_port 8770 180 && { [ "$EXTERNAL_ONLY" = 1 ] || listening 5620 || wait_port 5620 60; }; then ok "agent restarted cleanly"
   else warn "the agent did not answer after the final restart — run: heia restart"; fi
   # The agent started again, so it published itself again: take its address from the registry.
   if [ -n "$AGENT_URL" ]; then
@@ -1221,6 +1497,25 @@ UNIT_EOF
     done
     ok "agent reachable at $AGENT_URL"
   fi
+fi
+
+# AN EXTERNAL AGENT: everything it needs is in place — now its mission, then a short summary (no workspace).
+if [ "$EXTERNAL_ONLY" = 1 ]; then
+  export PATH="$HOME/.heia/bin:$PATH"      # heia: the mission step restarts the agent through its owner
+  external_door
+  spin_done
+  cat <<EOF
+  ${G}${B}Done.${N}  ${B}$NAME${N} is an external agent: other agents ask it by name and it answers with its mission.
+
+  Folders:  ~/hbia-agent           the licence — never move or rename it
+            ~/heia-router          the router (your provider key is in upstreams.yaml)
+            ~/heia-agent           the agent
+            ~/heia-agent-external  its mission, in its own store
+  Manage:   ${B}heia status${N} · ${B}heia restart${N} [agent|router|all] · ${B}heia logs${N} [agent|router]
+            (from any folder, in a new terminal — or after: source ${RCFILE})
+
+EOF
+  exit 0
 fi
 
 spin_done
