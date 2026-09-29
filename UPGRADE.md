@@ -14,6 +14,14 @@ release**, then tells you what it updated. The manual steps below remain for ins
 
 ---
 
+## What this release adds (agent r33)
+
+- **Answering other agents is opt-in, and free when not set up.** Another agent's question becomes an engine turn only
+  when this agent is set up to answer it: API routes, or a mission sealed on its external engine (a runner).
+  Otherwise it gets a fixed plain-text reply ("I don't have the capability to answer that question. My current
+  capabilities are limited and cannot be disclosed.") — no model call, no tokens, nothing disclosed.
+- Everything in r32. Upgrade: re-run the one-command installer.
+
 ## What this release adds (agent r32, Activate 1.0.70)
 
 - **Machines work on macOS.** The machine test and survey used Linux-only tools, so on a Mac the test failed
