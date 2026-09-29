@@ -49,6 +49,13 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$ALLOW" ] && [ -z "$ADD_EXTERNAL" ] && { printf '  --allow goes with --add-external\n'; exit 1; }
 
+# HOW LONG AN AGENT WAITS FOR ANOTHER AGENT'S ANSWER. The agent's own default is 2 minutes, and a mission
+# on the other side (several corpora, citation checks) routinely runs past it: the asker then hangs up and
+# the other side's turn is cancelled with it — the answer is lost at both ends. 20 minutes here; a value
+# already set in the environment wins. Exported so every agent this installer starts inherits it; systemd
+# gets the same value in a drop-in (step 7), since a unit does not inherit this shell.
+export HEIA_ASK_TIMEOUT_SECONDS="${HEIA_ASK_TIMEOUT_SECONDS:-1200}"
+
 LIC="$HOME/hbia-agent"        # the licence: env-file + hexaeight.mac, nothing else. Never move it.
 ROUTER="$HOME/heia-router"
 AGENT="$HOME/heia-agent"
@@ -1237,6 +1244,7 @@ cat > "$HOME/.heia/bin/heia" <<'HEIA_EOF'
 # restarts the loser forever. Where there is no manager, Activate does it, from the service's own folder
 # and in its own session, so what it starts is not killed with this terminal.
 set -u
+export HEIA_ASK_TIMEOUT_SECONDS="${HEIA_ASK_TIMEOUT_SECONDS:-1200}"   # waiting for another agent: 20 min (see install.sh)
 export DOTNET_ROOT="$HOME/.dotnet"
 export PATH="$HOME/.dotnet:$HOME/.dotnet/tools:$HOME/.heia/bin:$PATH"
 ROUTER="$HOME/heia-router"; AGENT="$HOME/heia-agent"; STATE="$HOME/.heia/install.state"
@@ -1462,6 +1470,14 @@ else
 ExecStartPre=/bin/bash -c 'for i in $(seq 1 90); do (exec 3<>/dev/tcp/127.0.0.1/5100) 2>/dev/null && { sleep 3; exit 0; }; sleep 1; done; echo "router not answering on :5100 after 90 s — starting the agent anyway"; exit 0'
 TimeoutStartSec=180
 UNIT_EOF
+  fi
+  # THE ASK TIMEOUT (see HEIA_ASK_TIMEOUT_SECONDS near the top): a unit does not inherit this shell, so
+  # systemd gets the value in its own drop-in — written on every run, so a re-run keeps it current.
+  if [ "$MANAGER" = systemd ]; then
+    mkdir -p "$UNITS_L/hexaeight-agent.service.d"
+    printf '%s\n' "# Written by the HexaEight installer: how long this agent waits for ANOTHER agent's answer." \
+                  "[Service]" "Environment=HEIA_ASK_TIMEOUT_SECONDS=$HEIA_ASK_TIMEOUT_SECONDS" \
+      > "$UNITS_L/hexaeight-agent.service.d/ask-timeout.conf"
   fi
   if [ "$MODE" = own ]; then ( cd "$AGENT" && activate autostart on --agent "$AGENT" --router "$ROUTER" > /tmp/heia-autostart.log 2>&1 )
   else                     ( cd "$AGENT" && activate autostart on --agent "$AGENT" > /tmp/heia-autostart.log 2>&1 ); fi
