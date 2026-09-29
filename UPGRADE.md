@@ -14,6 +14,17 @@ release**, then tells you what it updated. The manual steps below remain for ins
 
 ---
 
+## What this release adds (workspace r39)
+
+- **The Machines pane can be resized.** A chat bound to a machine had no drag handle on its right pane; it has
+  one now, with its own remembered width (up to 1600 px; double-click the handle to reset), separate from the
+  flowchart pane's.
+- **The terminal expands and docks.** "⤢ Expand" lifts the terminal over the page (the licence QR needs a wide
+  terminal); "⤡ Dock" puts it back under the command log. The shell session stays connected either way.
+
+Upgrade: re-run the one-command installer (it fetches only the workspace), or
+`cd <agent folder> && hexaeight-activate install-workspace --force --agent <agent name>`.
+
 ## What this release adds (workspace r38, Activate 1.0.72)
 
 - **A mission exported from the workspace carries the memories it searches.** Missions → Export now exports
