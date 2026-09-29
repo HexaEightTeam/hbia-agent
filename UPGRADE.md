@@ -14,6 +14,21 @@ release**, then tells you what it updated. The manual steps below remain for ins
 
 ---
 
+## What this release adds (workspace r38, Activate 1.0.72)
+
+- **A mission exported from the workspace carries the memories it searches.** Missions → Export now exports
+  with data, like the command line: a served memory (weather, a news feed, another agent's corpus) travels as
+  its pointer, a local one as data up to 500 MB. A larger local memory, or one marked `.no-export`, is left
+  out and named in the zip's manifest, so the importing machine is told what to supply.
+- **Activate 1.0.72 finds every memory a mission searches.** The export read only the mission's summary page,
+  so a memory named only in a card (`via: "memory: erag"`) was missed; it now reads every card. A served
+  memory's pointer travels with or without `--no-data`.
+- **Machines: the terminal is docked again** below the command log. Widen the right pane before the licence
+  step (`newtoken`) — its QR screen needs a wide terminal.
+
+Upgrade: `dotnet tool update -g HexaEight.Activate`, then re-run the one-command installer (it fetches only
+the workspace), or `cd <agent folder> && hexaeight-activate install-workspace --force`.
+
 ## What this release adds (router r9)
 
 - **The router no longer needs to know an agent's customers.** An agent can decline to name the callers it
