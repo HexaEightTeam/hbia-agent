@@ -1,2 +1,5 @@
 # Example files are checked against SHA256SUMS; keep their bytes exact on every OS (no CRLF conversion).
 integration_examples/** -text
+# Shell scripts run under bash on Linux/macOS/WSL: always LF, whatever the checkout platform.
+*.sh text eol=lf
+heia text eol=lf
