@@ -14,6 +14,20 @@ release**, then tells you what it updated. The manual steps below remain for ins
 
 ---
 
+## What this release adds (agent r32, Activate 1.0.70)
+
+- **Machines work on macOS.** The machine test and survey used Linux-only tools, so on a Mac the test failed
+  (`uptime: illegal option -- p`) and the survey showed blanks, "running=NO" and no router. Each now falls back
+  to the macOS equivalent, and a Mac router folder is recognised. The survey reads the service manager's live
+  log (journal / `~/.heia/logs`) when systemd or launchd runs the agent.
+- **Relay fallback.** An agent that gets no Cloudflare quick-tunnel address falls back to the fastagents.net
+  relay (`https://<name>.fastagents.net`, ticket issued by the registry over DDE). `"fallback": "none"` turns it off.
+- **Activate 1.0.70** recognises r31 as the earlier release, so installs upgrade instead of refusing it — and
+  from now on the list of earlier releases is read from `releases.json` (`"older"`), so a new agent release
+  no longer needs a new Activate.
+
+Upgrade: `dotnet tool update -g HexaEight.Activate`, then re-run the one-command installer.
+
 ## What this release adds (workspace r37)
 
 - **Receive messages at this agent.** Messages → "Receive my messages here" registers the signed-in
