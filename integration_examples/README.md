@@ -139,7 +139,8 @@ you pass `--force`.
 
 The `weather` and `bbc_news` tools search **served memories named `weather` and `bbc-news`** — each a
 pointer to another agent that seals an API route (see *An API you already run* in the docs). If your
-machine has none, those tools say so rather than guess. Rename them in the runner to the served
+machine has none, those tools say so rather than guess. Ready-made adapters for both (and for Wikipedia) are in
+[`api-adapters/`](api-adapters/README.md): run one, `add-api` it on an agent, add it as an External service. Rename them in the runner to the served
 memories you do have, or remove them — `list_memories` and `memory_search` work with whatever this
 machine holds.
 
