@@ -14,6 +14,15 @@ release**, then tells you what it updated. The manual steps below remain for ins
 
 ---
 
+## What this release adds (agent r34)
+
+- **Follow-up questions keep their context.** When another agent or a backend (BYOA) asks a follow-up in
+  the same session of an agent's external door, the mission continues from the earlier questions and answers
+  instead of starting over — "in that judgment, which cases did it overrule?" works as a follow-up.
+- Nothing else changes: router r9, workspace r39, harness engine r42 stay as they are.
+
+Upgrade: re-run the one-command installer (it updates only the agent).
+
 ## What this release adds (workspace r39)
 
 - **The Machines pane can be resized.** A chat bound to a machine had no drag handle on its right pane; it has
