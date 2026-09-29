@@ -1176,14 +1176,14 @@ else
   # ROUTER FIRST, AND READY. systemd's After=/Requires= only order the START: the agent is launched the
   # moment the router's process is, while the router is still checking its licence — and the agent
   # validates its routes once, at start. This drop-in holds every agent start (this hand-over, a restart,
-  # a reboot) until the router answers on :5100, up to 90 s. (launchd needs none: Activate's agent job
+  # a reboot) until the router answers on :5100 (up to 90 s), then 3 s more to settle — as the install itself does. (launchd needs none: Activate's agent job
   # already waits for :5100.) Written before the units are loaded, so the first start honours it too.
   if [ "$MANAGER" = systemd ] && [ "$MODE" = own ]; then
     mkdir -p "$UNITS_L/hexaeight-agent.service.d"
     cat > "$UNITS_L/hexaeight-agent.service.d/wait-for-router.conf" <<'UNIT_EOF'
 # Written by the HexaEight installer: start the agent only once the router answers on :5100.
 [Service]
-ExecStartPre=/bin/bash -c 'for i in $(seq 1 90); do (exec 3<>/dev/tcp/127.0.0.1/5100) 2>/dev/null && exit 0; sleep 1; done; echo "router not answering on :5100 after 90 s — starting the agent anyway"; exit 0'
+ExecStartPre=/bin/bash -c 'for i in $(seq 1 90); do (exec 3<>/dev/tcp/127.0.0.1/5100) 2>/dev/null && { sleep 3; exit 0; }; sleep 1; done; echo "router not answering on :5100 after 90 s — starting the agent anyway"; exit 0'
 TimeoutStartSec=180
 UNIT_EOF
   fi

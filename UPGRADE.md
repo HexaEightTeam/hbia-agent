@@ -5,9 +5,30 @@ installation, see [INSTALL.md](INSTALL.md).
 
 **Estimated time:** 15–20 minutes, most of it downloads.
 
+**The quickest upgrade is the one-command installer.** Run it again on the machine:
+
+    curl -fsSL https://raw.githubusercontent.com/HexaEightTeam/hbia-agent/main/install.sh | bash
+
+It compares what is installed with `releases.json` and downloads **only the components with a newer
+release**, then tells you what it updated. The manual steps below remain for installs made by hand.
+
 ---
 
-## What this release adds (agent r31, harness engine r42, workspace r36, Activate 1.0.69)
+## What this release adds (workspace r37)
+
+- **Receive messages at this agent.** Messages → "Receive my messages here" registers the signed-in
+  person's email at this agent (signed by the person and by the agent), so others can message them.
+  The strip names who is signed in and at which agent; "Stop receiving here" withdraws it. The agent
+  must accept incoming messages (`"incoming": true` in hexaeight-agent.json — the installer sets it).
+- **Built-in memories are protected.** `connect-to-agent` (talking to other agents by name) and
+  `hexaeight-docs` (the installation's guide, indexed by Activate 1.0.69) are no longer listed under
+  Memory, and the memory service refuses any change to them — they cannot be deleted from the workspace.
+  The model still sees and uses both.
+
+Upgrade: re-run the installer, or `cd <agent folder> && hexaeight-activate install-workspace --force`.
+Nothing else changes: agent r31, harness engine r42 and router r8 stay as they are.
+
+## Earlier: agent r31, harness engine r42, workspace r36, Activate 1.0.69
 
 - **Machines: operate your servers from the workspace (agent r31).** The agent's owner can add a server
   over SSH (a key or a username and password, tested first and then sealed under the agent's own key),
