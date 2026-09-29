@@ -1197,6 +1197,20 @@ UNIT_EOF
     warn "$MANAGER did not bring everything up (see /tmp/heia-autostart.log) — starting them directly instead"
     start_ourselves
   fi
+  # ONE MORE, CALM RESTART OF THE AGENT. After an install, the agent that came up at the end has more
+  # than once been unable to open its own sealed files (the workspace then shows InvalidOperationException
+  # — terms, sign-in); one restart a little later has fixed it every time (seen three times on WSL,
+  # 2026-09-29). Likely the several quick agent starts an install makes; until that is pinned down, the
+  # installer does what fixed it by hand: let things settle, restart the agent once, through its owner.
+  spin "Letting it settle, then restarting the agent once"
+  sleep 20
+  case "$MANAGER" in
+    systemd) systemctl --user restart hexaeight-agent.service > /dev/null 2>&1 ;;
+    launchd) launchctl kickstart -k "gui/$(id -u)/com.hexaeight.agent" > /dev/null 2>&1 ;;
+  esac
+  sleep 3
+  if wait_port 8770 180 && { listening 5620 || wait_port 5620 60; }; then ok "agent restarted cleanly"
+  else warn "the agent did not answer after the final restart — run: heia restart"; fi
   # The agent started again, so it published itself again: take its address from the registry.
   if [ -n "$AGENT_URL" ]; then
     spin "Waiting for the agent to publish itself again"
