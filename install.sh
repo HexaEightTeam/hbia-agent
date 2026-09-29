@@ -306,6 +306,62 @@ managed_stop() {
 }
 managed_stop
 
+# ONLY WHAT MOVED. releases.json (in the hbia-agent repo) names the current release of every component
+# and the SHA-256 of each platform's file; Activate's install-* commands read the same file. A re-run
+# compares what is here with it and fetches only the components that differ — a UI fix downloads the
+# 23 MB workspace, not the 180 MB agent. A first install is unchanged, and records what it put down.
+REL="$(curl -fsSL --max-time 20 https://raw.githubusercontent.com/HexaEightTeam/hbia-agent/main/releases.json 2>/dev/null || true)"
+rel_top() {     # rel_top <component> <key>          -> e.g. tag, repo
+  printf '%s\n' "$REL" | awk -v c="\"$1\":" -v k="\"$2\":" \
+    '$1==c{inc=1} inc && index($0,k){s=$0; sub(/^[^:]*: *"/,"",s); sub(/".*/,"",s); print s; exit}'
+}
+rel_asset() {   # rel_asset <component> <rid> <file|sha256>
+  printf '%s\n' "$REL" | awk -v c="\"$1\":" -v r="\"$2\":" -v k="\"$3\":" \
+    '$1==c{inc=1} inc && $1==r{inr=1} inr && index($0,k){s=$0; sub(/^[^:]*: *"/,"",s); sub(/".*/,"",s); print s; exit}'
+}
+sha_of() {
+  if [ "$OS" = "Darwin" ]; then shasum -a 256 "$1" 2>/dev/null | awk '{print toupper($1)}'
+  else sha256sum "$1" 2>/dev/null | awk '{print toupper($1)}'; fi
+}
+UPDATES=""
+RERUN=0; [ -f "$AGENT/$ABIN" ] && RERUN=1       # an install already here: this run checks for updates
+updated() { UPDATES="${UPDATES}  ${G}↑${N} $1"$'\n'; }
+# Is the file here the published one? Same bytes — or, on macOS, where signing a binary changes its
+# bytes, the release this installer recorded when it put the file there. No record on a Mac (installed
+# by an earlier version of this script): taken as current and recorded, rather than fetched again.
+is_current() {   # is_current <component> <file> <state key>
+  local pub tag; pub="$(rel_asset "$1" "$PLAT" sha256)"; tag="$(rel_top "$1" tag)"
+  [ -n "$pub" ] || return 0                                 # releases.json unreachable: change nothing
+  if [ "$(sha_of "$2")" = "$pub" ]; then state_set "$3" "$tag"; return 0; fi
+  if [ "$OS" = "Darwin" ]; then
+    [ "$(state_get "$3")" = "$tag" ] && return 0
+    [ -z "$(state_get "$3")" ] && { state_set "$3" "$tag"; return 0; }
+  fi
+  return 1
+}
+# An engine is a file under ~/.heia/runtime, fetched and verified here (Activate fetches engines only
+# together with a new agent). Swapped by RENAME — a running engine keeps its old file until restarted.
+upgrade_engine() {   # upgrade_engine <component> <folder> <local name>
+  local tgt="$HOME/.heia/runtime/$2/$3" pub tag file repo
+  [ -f "$tgt" ] || return 0
+  is_current "$1" "$tgt" "$1" && return 0
+  pub="$(rel_asset "$1" "$PLAT" sha256)"; tag="$(rel_top "$1" tag)"; file="$(rel_asset "$1" "$PLAT" file)"
+  repo="$(rel_top "$1" repo)"
+  spin "Updating the $2 engine to $tag"
+  if ! curl -fsSL --max-time 900 -o "$tgt.partial" "https://github.com/$repo/releases/download/$tag/$file"; then
+    warn "could not download the $2 engine $tag — the installed one stays"; return 0
+  fi
+  if [ "$(sha_of "$tgt.partial")" != "$pub" ]; then
+    mv "$tgt.partial" "$tgt.partial.rejected"
+    warn "the $2 engine download did not match its published hash — not installed (kept as $tgt.partial.rejected)"
+    return 0
+  fi
+  chmod +x "$tgt.partial"
+  mv "$tgt" "$tgt.prev_$(date +%Y%m%d_%H%M%S)" && mv "$tgt.partial" "$tgt"
+  [ "$OS" = "Darwin" ] && mac_sign "$tgt"
+  state_set "$1" "$tag"; updated "$2 engine → $tag"; ok "$2 engine updated to $tag"
+}
+
 # ══ 3 · the router ═════════════════════════════════════════════════════════════════════════════════
 step "3 · Model router"
 MODE="$(state_get router_mode)"
@@ -319,11 +375,25 @@ fi
 
 if [ "$MODE" = own ]; then
   link_licence "$ROUTER"
-  ls "$ROUTER/$RBIN" >/dev/null 2>&1 || spin "Downloading the router"
-  ls "$ROUTER/$RBIN" >/dev/null 2>&1 || activate install-router --dir "$ROUTER" > /tmp/heia-install-router.log 2>&1 \
-    || die "install-router failed — see /tmp/heia-install-router.log"
-  [ "$OS" = "Darwin" ] && mac_sign "$ROUTER/$RBIN"
-  ok "router installed in $ROUTER"
+  if [ ! -f "$ROUTER/$RBIN" ]; then
+    spin "Downloading the router"
+    activate install-router --dir "$ROUTER" > /tmp/heia-install-router.log 2>&1 \
+      || die "install-router failed — see /tmp/heia-install-router.log"
+    [ "$OS" = "Darwin" ] && mac_sign "$ROUTER/$RBIN"
+    state_set router "$(rel_top router tag)"
+    ok "router installed in $ROUTER"
+  elif is_current router "$ROUTER/$RBIN" router; then
+    ok "router installed in $ROUTER — current ($(state_get router))"
+  else
+    T="$(rel_top router tag)"; spin "Updating the router to $T"
+    RF=""; [ "$OS" = "Darwin" ] && RF="--force"      # a signed copy of an older release, recorded as ours
+    if activate install-router --dir "$ROUTER" $RF > /tmp/heia-install-router.log 2>&1; then
+      [ "$OS" = "Darwin" ] && mac_sign "$ROUTER/$RBIN"
+      state_set router "$T"; updated "router → $T"; ok "router updated to $T (the previous one is kept beside it)"
+    else
+      warn "the router was not updated — see /tmp/heia-install-router.log; the installed one keeps running"
+    fi
+  fi
 
   # THE PROVIDERS. An ANTHROPIC-format route is REQUIRED: the HexaEight harness engines (chat,
   # missions, coding) and the external framework runners speak it, so the install cannot work without
@@ -600,10 +670,35 @@ ok "engines will use route ${B}$ROUTE${N}, model ${B}$MODEL${N}"
 # ══ 4 · the agent ══════════════════════════════════════════════════════════════════════════════════
 step "4 · Agent"
 link_licence "$AGENT"
-ls "$AGENT/$ABIN" >/dev/null 2>&1 || spin "Downloading the agent and its runtime (a few hundred MB — a minute or two)"
-ls "$AGENT/$ABIN" >/dev/null 2>&1 || activate install-agent --dir "$AGENT" > /tmp/heia-install-agent.log 2>&1 \
-  || die "install-agent failed — see /tmp/heia-install-agent.log"
-ok "agent installed and verified against its published hash"
+if [ ! -f "$AGENT/$ABIN" ]; then
+  spin "Downloading the agent and its runtime (a few hundred MB — a minute or two)"
+  activate install-agent --dir "$AGENT" > /tmp/heia-install-agent.log 2>&1 \
+    || die "install-agent failed — see /tmp/heia-install-agent.log"
+  state_set agent "$(rel_top agent tag)"
+  state_set engine-harness "$(rel_top engine-harness tag)"; state_set engine-mindmapchat "$(rel_top engine-mindmapchat tag)"
+  ok "agent installed and verified against its published hash"
+else
+  # AN UPGRADE — the agent is stopped first (the router step stops it too; with a router elsewhere it
+  # may still run). install-agent keeps the old binary beside the new one, and REFUSES a binary that is
+  # no published release at all (a test build): that one is left alone.
+  if is_current agent "$AGENT/$ABIN" agent; then
+    ok "agent installed — current ($(state_get agent))"
+  else
+    T="$(rel_top agent tag)"
+    ( cd "$AGENT" && activate stop agent > /tmp/heia-agent-stop.log 2>&1 )
+    spin "Updating the agent to $T (a few hundred MB — a minute or two)"
+    AF=""; [ "$OS" = "Darwin" ] && AF="--force"; [ "${FORCE_AGENT:-0}" = 1 ] && AF="--force"
+    if activate install-agent --dir "$AGENT" $AF > /tmp/heia-install-agent.log 2>&1; then
+      state_set agent "$T"; updated "agent → $T"; ok "agent updated to $T (the previous binary is kept beside it)"
+    elif grep -q 'A DIFFERENT FILE' /tmp/heia-install-agent.log; then
+      warn "the agent here is not a published release (a test build?) — left as it is. FORCE_AGENT=1 replaces it with $T."
+    else
+      warn "the agent was not updated — see /tmp/heia-install-agent.log; the installed one stays"
+    fi
+  fi
+  upgrade_engine engine-harness harness hexaeight-engine
+  upgrade_engine engine-mindmapchat mindmapchat hexaeight-harness
+fi
 if [ "$OS" = "Darwin" ]; then
   # the agent, and the engines it brought with it (~/.heia/runtime/harness, mindmapchat)
   mac_sign "$AGENT/$ABIN" "$HOME"/.heia/runtime/harness/* "$HOME"/.heia/runtime/mindmapchat/*
@@ -627,6 +722,26 @@ spin "Sealing the engines against the router"
 activate engine --auto --dir "$AGENT" --route "$ROUTE" --model "$MODEL" --router "$ROUTER_ID" > /tmp/heia-engines.log 2>&1 \
   || die "could not seal the engines — see /tmp/heia-engines.log"
 ok "$(grep -o '[0-9]* engine(s) sealed' /tmp/heia-engines.log | tail -1) against the router"
+
+# MESSAGES FOR PEOPLE AT THIS AGENT ("incoming"): ON BY DEFAULT. Without it the agent exposes no
+# /api/incoming and a person who registered their email here (workspace → Messages → "Receive my messages
+# here") still gets nothing. Whether a message is ACCEPTED is still the agent's policy: the sender's agent
+# must be admitted, and the sending person must be allowed to reach the recipient. Set in the config
+# before the agent starts, so no extra restart. ENABLE_INCOMING=0 leaves it off.
+if [ "${ENABLE_INCOMING:-1}" = 1 ]; then
+  INODE="$HOME/.heia/runtime/node/bin/node"; [ -x "$INODE" ] || INODE="$(command -v node || true)"
+  ICFG="$AGENT/hexaeight-agent.json"
+  if [ -n "$INODE" ] && ! "$INODE" -e 'const d = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+                                       process.exit(d.incoming === true ? 0 : 1)' "$ICFG" 2>/dev/null; then
+    cp -p "$ICFG" "$ICFG.bak_$(date +%Y%m%d_%H%M%S)"
+    "$INODE" -e '
+      const fs = require("fs"), p = process.argv[1];
+      const d = JSON.parse(fs.readFileSync(p, "utf8"));
+      d.incoming = true;
+      fs.writeFileSync(p, JSON.stringify(d, null, 2) + "\n");' "$ICFG" || die "could not update $ICFG"
+  fi
+  ok "messages for people at this agent: on (register in workspace → Messages)"
+fi
 
 # MACHINES (the agent's "fleet"): lets you, the owner, work on THIS computer from chat (workspace →
 # Machines) — every command the model proposes is held until you approve it. Owner only. Enabled in
@@ -670,9 +785,31 @@ ok "agent running on :8770"
 
 # ══ 5 · the workspace ══════════════════════════════════════════════════════════════════════════════
 step "5 · Workspace"
-spin "Installing the workspace"
-( cd "$AGENT" && activate install-workspace > /tmp/heia-install-workspace.log 2>&1 ) \
-  || die "install-workspace failed — see /tmp/heia-install-workspace.log"
+WST="$(rel_top workspace tag)"
+if [ ! -f "$HOME/.heia/runtime/workspace/index.html" ]; then
+  spin "Installing the workspace"
+  ( cd "$AGENT" && activate install-workspace > /tmp/heia-install-workspace.log 2>&1 ) \
+    || die "install-workspace failed — see /tmp/heia-install-workspace.log"
+  [ -n "$WST" ] && state_set workspace "$WST"
+elif [ -n "$WST" ] && [ "$(state_get workspace)" != "$WST" ]; then
+  # The workspace folder carries no version, so what this installer recorded is the only record — none
+  # (an install by an earlier version of this script) means it is fetched once and then recorded.
+  # install-workspace --force backs up config.js and writes it again for this agent.
+  spin "Updating the workspace to $WST"
+  WA=""; [ "$SKIP_GATEWAY" = 1 ] || WA="--agent $NAME"
+  if ( cd "$AGENT" && activate install-workspace --force $WA > /tmp/heia-install-workspace.log 2>&1 ); then
+    state_set workspace "$WST"; updated "workspace → $WST"; ok "workspace updated to $WST"
+    WSPID0="$(if [ "$OS" = "Darwin" ]; then lsof -tiTCP:5620 -sTCP:LISTEN 2>/dev/null | head -1
+              else ss -ltnp 2>/dev/null | grep ':5620 ' | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2; fi)"
+    [ -n "$WSPID0" ] && kill "$WSPID0" 2>/dev/null && sleep 1   # its server restarts below on the new files
+  else
+    warn "the workspace was not updated — see /tmp/heia-install-workspace.log; the installed one stays"
+  fi
+else
+  spin "Checking the workspace"
+  ( cd "$AGENT" && activate install-workspace > /tmp/heia-install-workspace.log 2>&1 ) \
+    || die "install-workspace failed — see /tmp/heia-install-workspace.log"
+fi
 # The workspace is static files plus a small static server — `restart workspace` only says so and
 # starts nothing. Start that server here, detached, so it outlives this script; autostart (below)
 # brings it back at the next login.
@@ -1036,6 +1173,20 @@ else
   [ "$MODE" = own ] && ( cd "$ROUTER" && activate stop router > /tmp/heia-router-stop.log 2>&1 )
   WSPID="$(port_pid 5620)"; [ -n "$WSPID" ] && kill "$WSPID" 2>/dev/null
   for i in $(seq 1 30); do listening 8770 || listening 5620 || { [ "$MODE" = own ] && listening 5100; } || break; sleep 1; done
+  # ROUTER FIRST, AND READY. systemd's After=/Requires= only order the START: the agent is launched the
+  # moment the router's process is, while the router is still checking its licence — and the agent
+  # validates its routes once, at start. This drop-in holds every agent start (this hand-over, a restart,
+  # a reboot) until the router answers on :5100, up to 90 s. (launchd needs none: Activate's agent job
+  # already waits for :5100.) Written before the units are loaded, so the first start honours it too.
+  if [ "$MANAGER" = systemd ] && [ "$MODE" = own ]; then
+    mkdir -p "$UNITS_L/hexaeight-agent.service.d"
+    cat > "$UNITS_L/hexaeight-agent.service.d/wait-for-router.conf" <<'UNIT_EOF'
+# Written by the HexaEight installer: start the agent only once the router answers on :5100.
+[Service]
+ExecStartPre=/bin/bash -c 'for i in $(seq 1 90); do (exec 3<>/dev/tcp/127.0.0.1/5100) 2>/dev/null && exit 0; sleep 1; done; echo "router not answering on :5100 after 90 s — starting the agent anyway"; exit 0'
+TimeoutStartSec=180
+UNIT_EOF
+  fi
   if [ "$MODE" = own ]; then ( cd "$AGENT" && activate autostart on --agent "$AGENT" --router "$ROUTER" > /tmp/heia-autostart.log 2>&1 )
   else                     ( cd "$AGENT" && activate autostart on --agent "$AGENT" > /tmp/heia-autostart.log 2>&1 ); fi
   UP=1
@@ -1059,6 +1210,9 @@ else
 fi
 
 spin_done
+if [ -n "$UPDATES" ]; then printf '\n  %sUpdated this run%s (only what had a newer release):\n%s' "$B" "$N" "$UPDATES"
+elif [ "$RERUN" = 1 ] && [ -n "$REL" ]; then printf '\n  Everything was already on its current release — nothing downloaded.\n'
+elif [ "$RERUN" = 1 ]; then printf '\n  %s!%s The release list could not be read, so nothing was checked for updates.\n' "$Y" "$N"; fi
 OPEN="${WS_URL:-http://localhost:5620}"
 cat <<EOF
 
