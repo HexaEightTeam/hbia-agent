@@ -14,6 +14,20 @@ release**, then tells you what it updated. The manual steps below remain for ins
 
 ---
 
+## What this release adds (router r10)
+
+- **Upstream keys are sealed in `upstreams.yaml`.** On its first start the router replaces every plain provider
+  key (`secret:` values and credential headers such as `api-key`) with `<ciphertext>.sm1`, sealed under its own
+  identity, and opens them only in memory. `${VAR}` placeholders are untouched. A key added later in plain text
+  is sealed at the next start.
+- The original file is kept as `upstreams.yaml.bak_<time>_pre_sm1` (mode 0600, plain keys) — delete it once the
+  router is known to work. The file is only rewritten after every key has been sealed and opened again.
+- `upstreams.yaml` is now tied to one router; copying it to another router means entering the keys again.
+- **Rolling back to r9:** copy `upstreams.yaml.bak_*_pre_sm1` back over `upstreams.yaml`, put the previous router
+  binary back (kept beside the new one), restart the router.
+
+Upgrade: re-run the one-command installer (it updates the router).
+
 ## What this release adds (agent r35, harness engine r43, workspace r40, Activate 1.0.73)
 
 - **`api-daemon`** — a program on the agent's machine can call a peer agent's sealed API (as the agent, or on
