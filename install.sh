@@ -983,6 +983,20 @@ if [ "$MODE" = own ]; then
   fi
 
   MODEL="$(state_get model)"
+  # AN INSTALL ALREADY IN USE (adopted, no record here): the model is the one its router has been serving —
+  # read from the router's own log, not asked again (asking could re-seal the engines on another model).
+  if [ -z "$MODEL" ]; then
+    MODEL="$(cat "$ROUTER/router.log" "$HOME/.heia/logs/router.log" 2>/dev/null | grep -a -o "^\[/v1/messages\] .* as '[^']*' via" | tail -1 | sed "s/.* as '\([^']*\)' via/\1/")"
+    [ -n "$MODEL" ] && { state_set model "$MODEL"; note "model in use on this router: $MODEL (kept)"; }
+  fi
+  # SEALED KEYS (router r10+ seals upstreams.yaml): the provider cannot be asked for its models with the
+  # sealed value — only the router can open it. Ask for the model id instead.
+  if [ -z "$MODEL" ] && grep -q '\.sm1"' "$ROUTER/upstreams.yaml" 2>/dev/null; then
+    note "The provider keys here are sealed by the router, so its model list cannot be fetched from here."
+    ask "Model id the agent should use (e.g. zai.glm-5)" "zai.glm-5"
+    MODEL="$REPLY"; [ -n "$MODEL" ] || die "no model chosen"
+    state_set model "$MODEL"
+  fi
   if [ -z "$MODEL" ]; then
     # THE MODEL — a short numbered list of CHAT models. The provider also lists embedding, image,
     # video, rerank and speech models; none of them can hold a conversation, so they are left out
