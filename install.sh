@@ -963,6 +963,37 @@ else
   upgrade_engine engine-harness harness hexaeight-engine
   upgrade_engine engine-mindmapchat mindmapchat hexaeight-harness
 fi
+# LOCAL VISION MODELS (engine r43+). A model without vision gets a local description of a screenshot from
+# these files (~250 MB, Florence-2-base, MIT); without them the engine still reads text, colours and shapes.
+# Fetched once, verified against releases.json "engine-harness-vision", unpacked beside the harness engine
+# and swapped in by rename. Never fatal: a failure leaves the engine working without local vision.
+install_vision() {
+  local eng="$HOME/.heia/runtime/harness/hexaeight-engine" dir="$HOME/.heia/runtime/harness/models/smallintel-vision"
+  local pub tag file repo tmp
+  [ -f "$eng" ] || return 0
+  pub="$(rel_asset engine-harness-vision any sha256)"; [ -n "$pub" ] || return 0
+  [ "$(cat "$dir/.release-sha256" 2>/dev/null)" = "$pub" ] && { ok "local vision models present"; return 0; }
+  tag="$(rel_top engine-harness-vision tag)"; file="$(rel_asset engine-harness-vision any file)"; repo="$(rel_top engine-harness-vision repo)"
+  tmp="$HOME/.heia/runtime/harness/models/.vision-download"; rm -rf "$tmp"; mkdir -p "$tmp"
+  spin "Downloading the local vision models ($tag, ~175 MB)"
+  if ! curl -fsSL --max-time 1800 -o "$tmp/$file" "https://github.com/$repo/releases/download/$tag/$file"; then
+    spin_done; warn "could not download the local vision models — the engine works without them"; rm -rf "$tmp"; return 0
+  fi
+  if [ "$(sha_of "$tmp/$file")" != "$pub" ]; then
+    spin_done; warn "the local vision models did not match their published hash — not installed"; rm -rf "$tmp"; return 0
+  fi
+  mkdir -p "$tmp/x"
+  if command -v unzip > /dev/null 2>&1; then unzip -q "$tmp/$file" -d "$tmp/x"
+  elif command -v python3 > /dev/null 2>&1; then python3 -m zipfile -e "$tmp/$file" "$tmp/x"
+  else spin_done; warn "neither unzip nor python3 is available — local vision models not unpacked"; rm -rf "$tmp"; return 0; fi
+  [ -f "$tmp/x/vision_encoder_q4.onnx" ] && [ -f "$tmp/x/tokenizer.json" ] \
+    || { spin_done; warn "the local vision models archive is incomplete — not installed"; rm -rf "$tmp"; return 0; }
+  printf '%s' "$pub" > "$tmp/x/.release-sha256"
+  [ -d "$dir" ] && mv "$dir" "$dir.prev_$(date +%Y%m%d_%H%M%S)"
+  mv "$tmp/x" "$dir"; rm -rf "$tmp"
+  spin_done; updated "local vision models → $tag"; ok "local vision models installed ($tag)"
+}
+install_vision
 if [ "$OS" = "Darwin" ]; then
   # the agent, and the engines it brought with it (~/.heia/runtime/harness, mindmapchat)
   mac_sign "$AGENT/$ABIN" "$HOME"/.heia/runtime/harness/* "$HOME"/.heia/runtime/mindmapchat/*

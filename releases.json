@@ -85,6 +85,17 @@
       }
     }
   },
+  "engine-harness-vision": {
+    "repo": "HexaEightTeam/hbia-agent",
+    "tag": "v2026.10.05-r43",
+    "assets": {
+      "any": {
+        "file": "smallintel-vision-models.zip",
+        "sha256": "6F18EE7D21F4AFC69898D9ED4535398CAF876460CE12DEA1E3D532CFF92749A9",
+        "protection": ""
+      }
+    }
+  },
   "engine-mindmapchat": {
     "repo": "HexaEightTeam/hbia-agent",
     "tag": "v2026.09.06-r21",
