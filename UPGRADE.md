@@ -14,6 +14,28 @@ release**, then tells you what it updated. The manual steps below remain for ins
 
 ---
 
+## What this release adds (agent r35, harness engine r43, workspace r40, Activate 1.0.73)
+
+- **`api-daemon`** — a program on the agent's machine can call a peer agent's sealed API (as the agent, or on
+  behalf of a signed-in user) without a chat turn: one JSON request per line in, one answer per line out.
+- **HexaPilot** — long jobs the agent drives step by step: shaped with you in a chat, then run unattended in a
+  confined folder (plan, review, work, verify), with the agent running the job's own checks before it calls the
+  job done. Jobs survive restarts, can be paused, answered and cleared; processes a job starts are recorded and
+  stopping one needs your approval. The workspace gets a HexaPilot rail, overview and job panel.
+- **Engine r43** — models without vision get a local reading of screenshots; JPEG/WebP/tall screenshots read
+  screen by screen, `Read` can compare with a reference; Office documents, PDFs and archives are read as text,
+  nothing run or extracted; web pages say what the reader view hid; approving a command that names a folder
+  elsewhere works; memory refresh keeps only the new text.
+- **Workspace r40** — Attach files to a chat; cards still draw when a model slips; remote-browser inspection
+  endpoints and a limit of two open tabs (no new tab when the machine is low on memory); Rebuild index re-reads
+  changed documents.
+- **Agent** — a side service found already running is now watched, and restarted by the agent if it stops.
+- **Activate 1.0.73** seals the two HexaPilot engines and carries the updated browser instructions; update the
+  tool to use HexaPilot. Router stays r9; mindmapchat engine stays r21.
+
+Upgrade: update the tool (`dotnet tool update -g HexaEight.Activate`), then re-run the one-command installer
+(it updates the agent, the harness engine and the workspace).
+
 ## What this release adds (agent r34)
 
 - **Follow-up questions keep their context.** When another agent or a backend (BYOA) asks a follow-up in
