@@ -28,10 +28,17 @@
 # On a NEW machine that installs only what such an agent needs — the licence, the router, the agent,
 # its policy and its public address; no workspace. On a machine already installed it adds the mission
 # and changes nothing else. The mission lives in ~/heia-agent-external, in its own store.
+#
+# AN INSTALL IN OTHER FOLDERS (made by hand or by an older procedure — e.g. the agent run inside the
+# licence folder ~/hbia-agent, the router in ~/hbia-router) is found from the running agent and router,
+# or named:   … | bash -s -- --agent-dir ~/hbia-agent --router-dir ~/hbia-router
+# It is upgraded IN PLACE: nothing moves, and its router policy and caller settings are kept
+# (--reset-router-policy replaces that policy with the base rules).
 # ──────────────────────────────────────────────────────────────────────────────────────────────────
 set -u
 
 SKIP_GATEWAY=0
+AGENT_DIR_ARG=""; ROUTER_DIR_ARG=""; LIC_DIR_ARG=""; RESET_POLICY=0
 ADD_EXTERNAL=""
 ALLOW=""
 ARGS_TEXT=""
@@ -42,8 +49,13 @@ while [ $# -gt 0 ]; do
                     ARGS_TEXT="$ARGS_TEXT --add-external $ADD_EXTERNAL"; shift ;;
     --allow)        [ -n "${2:-}" ] || { printf '  --allow needs an agent name\n'; exit 1; }
                     ALLOW="$ALLOW $2"; ARGS_TEXT="$ARGS_TEXT --allow $2"; shift ;;
-    -h|--help) sed -n '2,32p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) printf '  unknown option: %s  (known: --skip-gateway, --add-external <mission.zip|framework>, --allow <agent>)\n' "$1"; exit 1 ;;
+    --agent-dir|--router-dir|--licence-dir|--license-dir)
+                    [ -n "${2:-}" ] || { printf '  %s needs a folder\n' "$1"; exit 1; }
+                    case "$1" in --agent-dir) AGENT_DIR_ARG="$2";; --router-dir) ROUTER_DIR_ARG="$2";; *) LIC_DIR_ARG="$2";; esac
+                    ARGS_TEXT="$ARGS_TEXT $1 $2"; shift ;;
+    --reset-router-policy) RESET_POLICY=1; ARGS_TEXT="$ARGS_TEXT --reset-router-policy" ;;
+    -h|--help) sed -n '2,38p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) printf '  unknown option: %s  (known: --skip-gateway, --add-external <mission.zip|framework>, --allow <agent>,\n   --agent-dir, --router-dir, --licence-dir <folder>, --reset-router-policy)\n' "$1"; exit 1 ;;
   esac
   shift
 done
@@ -128,22 +140,76 @@ ABIN="hexaeight-agent-$PLAT"; RBIN="hexaeight-router-$PLAT"
 inode()     { if [ "$OS" = "Darwin" ]; then stat -f %i "$1"; else stat -c %i "$1"; fi; }
 listening() { if [ "$OS" = "Darwin" ]; then lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1; else ss -ltn 2>/dev/null | grep -q ":$1 "; fi; }
 
+# ── WHERE THINGS ARE. The documented layout is ~/hbia-agent (licence only), ~/heia-router, ~/heia-agent.
+# An install made otherwise — by hand, or by an older procedure that ran the agent INSIDE the licence
+# folder and the router in ~/hbia-router — is upgraded where it is, never moved. Each folder comes from,
+# in order: --agent-dir / --router-dir / --licence-dir · what an earlier run recorded · the default
+# folder if it holds the binary · the folder of the RUNNING agent/router · a known older folder ·
+# the default. An install found anywhere but the defaults is ADOPTED: upgraded in place, and its
+# router policy and caller settings are left as they are.
+abs_dir() { local d="${1/#\~/$HOME}"; d="${d%/}"; case "$d" in /*) ;; *) d="$PWD/$d";; esac; printf '%s' "$d"; }
+running_dir() {   # running_dir <binary name> -> folder of the running main process (not its mcp children)
+  local pid p
+  for pid in $(pgrep -x "$1" 2>/dev/null) $(pgrep -f "/$1\$" 2>/dev/null); do
+    p="$(ps -o args= -p "$pid" 2>/dev/null)"; [ "${p#* }" = "$p" ] || continue   # has arguments: a child
+    case "$p" in
+      /*) dirname "$p"; return 0 ;;
+      *)  if [ -d "/proc/$pid" ]; then readlink "/proc/$pid/cwd" && return 0
+          else lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1; return 0; fi ;;
+    esac
+  done
+  return 1
+}
+pick_dir() {   # pick_dir <flag value> <state key> <default> <binary> <older folder>
+  local d
+  [ -n "$1" ] && { abs_dir "$1"; return; }
+  d="$(state_get "$2")"; [ -n "$d" ] && { printf '%s' "$d"; return; }
+  [ -f "$3/$4" ] && { printf '%s' "$3"; return; }
+  d="$(running_dir "$4")"; [ -n "$d" ] && [ -f "$d/$4" ] && { printf '%s' "$d"; return; }
+  [ -n "$5" ] && [ -f "$5/$4" ] && { printf '%s' "$5"; return; }
+  printf '%s' "$3"
+}
+LIC="$(pick_dir "$LIC_DIR_ARG" licence_dir "$HOME/hbia-agent" env-file "")"
+AGENT="$(pick_dir "$AGENT_DIR_ARG" agent_dir "$HOME/heia-agent" "$ABIN" "$LIC")"
+ROUTER="$(pick_dir "$ROUTER_DIR_ARG" router_dir "$HOME/heia-router" "$RBIN" "$HOME/hbia-router")"
+ADOPTED=0
+if [ "$AGENT" != "$HOME/heia-agent" ] || [ "$ROUTER" != "$HOME/heia-router" ] || [ "$LIC" != "$HOME/hbia-agent" ]; then
+  ADOPTED=1
+  state_set agent_dir "$AGENT"; state_set router_dir "$ROUTER"; state_set licence_dir "$LIC"
+fi
+same_dir() { [ "$(cd "$1" 2>/dev/null && pwd -P)" = "$(cd "$2" 2>/dev/null && pwd -P)" ]; }
+short() { case "$1" in "$HOME"/*) printf '~%s' "${1#"$HOME"}" ;; *) printf '%s' "$1" ;; esac; }   # ~/x for display
+
 # hardlink the licence into a component folder (ln, never cp) and prove it by inode
+link_one() {   # link_one <licence file name> <folder>
+  # macOS: Activate locks the licence files immutable (chflags uchg), and an immutable file refuses
+  # new hardlinks. Unlock for the one link, then lock again — a hardlink is the same file, so the
+  # lock covers every folder's name for it. (Linux: an ordinary user cannot set that flag.)
+  local relock=0 rc
+  if [ "$OS" = "Darwin" ] && stat -f %Sf "$LIC/$1" 2>/dev/null | grep -q uchg; then
+    chflags nouchg "$LIC/$1" && relock=1
+  fi
+  ln "$LIC/$1" "$2/$1"; rc=$?
+  [ "$relock" = 1 ] && chflags uchg "$LIC/$1"
+  [ "$rc" = 0 ] || die "could not hardlink $1 into $2"
+}
 link_licence() {
-  local d="$1" f
+  local d="$1" f keep
   mkdir -p "$d"
+  # The agent run INSIDE the licence folder (an older layout): the licence is already here, as itself.
+  if same_dir "$d" "$LIC"; then ok "licence in $d itself (the agent runs in the licence folder)"; return 0; fi
   for f in env-file hexaeight.mac; do
     if [ ! -e "$d/$f" ]; then
-      # macOS: Activate locks the licence files immutable (chflags uchg), and an immutable file refuses
-      # new hardlinks. Unlock for the one link, then lock again — a hardlink is the same file, so the
-      # lock covers every folder's name for it. (Linux: an ordinary user cannot set that flag.)
-      local relock=0 rc
-      if [ "$OS" = "Darwin" ] && stat -f %Sf "$LIC/$f" 2>/dev/null | grep -q uchg; then
-        chflags nouchg "$LIC/$f" && relock=1
-      fi
-      ln "$LIC/$f" "$d/$f"; rc=$?
-      [ "$relock" = 1 ] && chflags uchg "$LIC/$f"
-      [ "$rc" = 0 ] || die "could not hardlink $f into $d"
+      link_one "$f" "$d"
+    elif [ "$(inode "$LIC/$f")" != "$(inode "$d/$f")" ]; then
+      # A COPY left by an earlier install. Same bytes: the copy is moved aside (kept, never deleted) and
+      # replaced by a hardlink, so the two can never drift. Different bytes: a different licence — stop.
+      cmp -s "$LIC/$f" "$d/$f" || die "$d/$f is a DIFFERENT licence file from $LIC/$f — name the right licence folder with --licence-dir"
+      keep="$d/$f.bak_$(date +%Y%m%d_%H%M%S)_copy"
+      [ "$OS" = "Darwin" ] && chflags nouchg "$d/$f" 2>/dev/null
+      mv "$d/$f" "$keep" || die "could not move the copied $f in $d aside"
+      link_one "$f" "$d"
+      warn "$d/$f was a COPY of the licence file — now a hardlink; the copy is kept as $keep (delete it)"
     fi
     [ "$(inode "$LIC/$f")" = "$(inode "$d/$f")" ] || die "$d/$f is not a hardlink of $LIC/$f — do not copy licence files"
   done
@@ -531,7 +597,7 @@ if [ ! -f "$LIC/env-file" ] || [ ! -f "$LIC/hexaeight.mac" ]; then
   and a name for this agent. It asks for them and shows a QR code to approve on your phone.
 
       ${B}source ${RCFILE}${N}
-      ${B}cd ~/hbia-agent && hexaeight-activate newtoken${N}
+      ${B}cd $LIC && hexaeight-activate newtoken${N}
 
   The first line matters: it puts the tool this installer just added (~/.dotnet/tools) first on
   your PATH. Without it the terminal may find another program of the same name — on WSL, a
@@ -549,8 +615,12 @@ fi
 
 NAME="$(cd "$LIC" && activate verify-license 2>&1 | sed -n 's/^ *Identity: *//p' | head -1)"
 ( cd "$LIC" && activate verify-license 2>&1 | grep -q "installed and working" ) \
-  || die "the licence in ~/hbia-agent does not verify. Run: cd ~/hbia-agent && hexaeight-activate verify-license"
+  || die "the licence in $LIC does not verify. Run: cd $LIC && hexaeight-activate verify-license"
 ok "licence verified — this agent is ${B}$NAME${N}"
+if [ "$ADOPTED" = 1 ]; then
+  note "An existing install, upgraded where it is: agent ${B}$AGENT${N} · router ${B}$ROUTER${N} · licence ${B}$LIC${N}"
+  same_dir "$AGENT" "$LIC" && note "(the agent runs inside the licence folder — the licence stays as it is)"
+fi
 state_set identity "$NAME"
 
 # ONE OWNER PER SERVICE. Once installed, the service manager (systemd --user / launchd) runs router,
@@ -592,14 +662,16 @@ RERUN=0; [ -f "$AGENT/$ABIN" ] && RERUN=1       # an install already here: this 
 updated() { UPDATES="${UPDATES}  ${G}↑${N} $1"$'\n'; }
 # Is the file here the published one? Same bytes — or, on macOS, where signing a binary changes its
 # bytes, the release this installer recorded when it put the file there. No record on a Mac (installed
-# by an earlier version of this script): taken as current and recorded, rather than fetched again.
+# by an earlier version of this script): taken as current and recorded, rather than fetched again —
+# EXCEPT for an ADOPTED install (other folders, not put there by this script): its files have no record
+# because this script never saw them, so they are fetched once and recorded from then on.
 is_current() {   # is_current <component> <file> <state key>
   local pub tag; pub="$(rel_asset "$1" "$PLAT" sha256)"; tag="$(rel_top "$1" tag)"
   [ -n "$pub" ] || return 0                                 # releases.json unreachable: change nothing
   if [ "$(sha_of "$2")" = "$pub" ]; then state_set "$3" "$tag"; return 0; fi
   if [ "$OS" = "Darwin" ]; then
     [ "$(state_get "$3")" = "$tag" ] && return 0
-    [ -z "$(state_get "$3")" ] && { state_set "$3" "$tag"; return 0; }
+    [ -z "$(state_get "$3")" ] && [ "$ADOPTED" != 1 ] && { state_set "$3" "$tag"; return 0; }
   fi
   return 1
 }
@@ -799,7 +871,8 @@ if [ "$MODE" = own ]; then
   # OPAQUE CALLERS PERMITTED — the router's default, and how the reference install runs: an agent may
   # decline to name a caller, and that session is attributed to the agent. `requireIdentifiedCaller:
   # true` refuses such sessions; an earlier version of this installer wrote it, so remove it if present.
-  if grep -q '^requireIdentifiedCaller:' "$ROUTER/upstreams.yaml"; then
+  # An ADOPTED install keeps it: there it was someone's decision, not this script's.
+  if [ "$ADOPTED" != 1 ] && grep -q '^requireIdentifiedCaller:' "$ROUTER/upstreams.yaml"; then
     cp -p "$ROUTER/upstreams.yaml" "$ROUTER/upstreams.yaml.bak_$(date +%Y%m%d_%H%M%S)"
     grep -v '^requireIdentifiedCaller:' "$ROUTER/upstreams.yaml" > "$ROUTER/upstreams.yaml.new" \
       && mv "$ROUTER/upstreams.yaml.new" "$ROUTER/upstreams.yaml"
@@ -860,7 +933,16 @@ if [ "$MODE" = own ]; then
     sleep 3
   }
   router_restart
-  if [ "$(router_rules)" != "$WANT" ]; then
+  KEEP_POLICY=0
+  if [ "$(router_rules)" != "$WANT" ] && [ "$ADOPTED" = 1 ] && [ "$RESET_POLICY" != 1 ]; then
+    # AN ADOPTED INSTALL keeps its router policy: it may carry rules for other agents or people that this
+    # script knows nothing about, and resetting it would cut them off. --reset-router-policy writes the
+    # base rules instead (the old store is kept as a backup, as below).
+    KEEP_POLICY=1
+    note "This router's own policy is kept (an existing install — nothing reset). It enforces:"
+    router_rules | sed 's/^/    /'
+    warn "if turns fail with \"no LLM route\", run this again with --reset-router-policy to write the base rules"
+  elif [ "$(router_rules)" != "$WANT" ]; then
     # Anything else — the open wildcards of a fresh router, a looser rule, an extra one — is reset:
     # --init-policy only ADDS rules, so the old store is moved aside (kept as a backup), the router
     # starts from its fresh default, and exactly the base rules are written. Re-running this
@@ -890,11 +972,15 @@ if [ "$MODE" = own ]; then
     done
     router_restart
   fi
-  if [ "$(router_rules)" != "$WANT" ]; then
-    note "The router enforces:"; router_rules | sed 's/^/    /'
-    die "the router's policy is not the expected $NRULES rules — see /tmp/heia-router-policy.log"
+  if [ "$KEEP_POLICY" = 1 ]; then
+    ok "router running on :5100 — its own policy kept ($(router_rules | grep -c .) rules)"
+  else
+    if [ "$(router_rules)" != "$WANT" ]; then
+      note "The router enforces:"; router_rules | sed 's/^/    /'
+      die "the router's policy is not the expected $NRULES rules — see /tmp/heia-router-policy.log"
+    fi
+    ok "router running on :5100 — enforcing $NRULES rules: $NAME, and $OWNER only through it"
   fi
-  ok "router running on :5100 — enforcing $NRULES rules: $NAME, and $OWNER only through it"
 
   MODEL="$(state_get model)"
   if [ -z "$MODEL" ]; then
@@ -1278,7 +1364,10 @@ set -u
 export HEIA_ASK_TIMEOUT_SECONDS="${HEIA_ASK_TIMEOUT_SECONDS:-1200}"   # waiting for another agent: 20 min (see install.sh)
 export DOTNET_ROOT="$HOME/.dotnet"
 export PATH="$HOME/.dotnet:$HOME/.dotnet/tools:$HOME/.heia/bin:$PATH"
-ROUTER="$HOME/heia-router"; AGENT="$HOME/heia-agent"; STATE="$HOME/.heia/install.state"
+STATE="$HOME/.heia/install.state"
+# the folders install.sh recorded for an install it adopted where it was; else the documented layout
+ROUTER="$(sed -n 's/^router_dir=//p' "$STATE" 2>/dev/null | tail -1)"; ROUTER="${ROUTER:-$HOME/heia-router}"
+AGENT="$(sed -n 's/^agent_dir=//p' "$STATE" 2>/dev/null | tail -1)"; AGENT="${AGENT:-$HOME/heia-agent}"
 WS="$HOME/.heia/runtime/workspace"; NODE="$HOME/.heia/runtime/node/bin/node"
 OS="$(uname -s)"
 if [ -t 1 ]; then B=$'\e[1m'; G=$'\e[32m'; R=$'\e[31m'; Y=$'\e[33m'; N=$'\e[0m'; else B= G= R= Y= N=; fi
@@ -1554,10 +1643,10 @@ if [ "$EXTERNAL_ONLY" = 1 ]; then
   cat <<EOF
   ${G}${B}Done.${N}  ${B}$NAME${N} is an external agent: other agents ask it by name and it answers with its mission.
 
-  Folders:  ~/hbia-agent           the licence — never move or rename it
-            ~/heia-router          the router (your provider key is in upstreams.yaml)
-            ~/heia-agent           the agent
-            ~/heia-agent-external  its mission, in its own store
+  Folders:  $(short "$LIC")   the licence — never move or rename it
+            $(short "$ROUTER")   the router (your provider key is in upstreams.yaml)
+            $(short "$AGENT")   the agent
+            $(short "$AGENT")-external   its mission, in its own store
   Manage:   ${B}heia status${N} · ${B}heia restart${N} [agent|router|all] · ${B}heia logs${N} [agent|router]
             (from any folder, in a new terminal — or after: source ${RCFILE})
 
@@ -1575,9 +1664,9 @@ cat <<EOF
   ${G}${B}Done.${N}  Open ${B}$OPEN${N} and sign in as ${B}$OWNER${N} with your Authenticator.
   Ask it something — an answer in the browser proves the whole chain.
 
-  Folders:  ~/hbia-agent   the licence — never move or rename it
-            ~/heia-router  the router (your provider key is in upstreams.yaml)
-            ~/heia-agent   the agent
+  Folders:  $(short "$LIC")   the licence — never move or rename it
+            $(short "$ROUTER")   the router (your provider key is in upstreams.yaml)
+            $(short "$AGENT")   the agent
   Manage:   ${B}heia status${N} · ${B}heia restart${N} [agent|router|all] · ${B}heia logs${N} [agent|router]
             (from any folder, in a new terminal — or after: source ${RCFILE})
 EOF
