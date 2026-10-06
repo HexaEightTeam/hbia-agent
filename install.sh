@@ -1025,10 +1025,35 @@ if [ "$API" = 1 ]; then
     fi
     [ "$OS" = "Darwin" ] && mac_sign "$CF"
   fi
-  if [ "$FRESH" = 1 ] || [ "$TRIM" = 1 ]; then
-    [ -f "$CFG" ] || die "no $CFG to write — install-agent should have created it (see /tmp/heia-install-agent.log)"
-    cp -p "$CFG" "$CFG.bak_$(date +%Y%m%d_%H%M%S)_pre_api"
-    APIJS='delete d.llmPort;
+  # api_edit <file> <js> <py> — apply one change to a JSON config, whichever runner this machine has.
+  # The JS sees `d` (the config) and `cf`; the Python sees the same names. Both write it back indented.
+  api_edit() {
+    local f="$1" js="$2" py="$3" nodex
+    nodex="$HOME/.heia/runtime/node/bin/node"; [ -x "$nodex" ] || nodex="$(command -v node 2>/dev/null || true)"
+    if [ -n "$nodex" ]; then
+      "$nodex" -e 'const fs = require("fs"), [p, cf] = process.argv.slice(1);
+        const d = JSON.parse(fs.readFileSync(p, "utf8")); '"$js"'
+        fs.writeFileSync(p, JSON.stringify(d, null, 2) + "\n");' "$f" "$CF"
+    # macOS BEFORE python3: without developer tools /usr/bin/python3 is a stub that only offers to install
+    # Xcode and fails; macOS's own JavaScript (osascript) is always there.
+    elif [ "$OS" = "Darwin" ]; then
+      osascript -l JavaScript -e 'ObjC.import("Foundation");
+        function run(argv) { var p = argv[0], cf = argv[1] || "";
+          var d = JSON.parse($.NSString.stringWithContentsOfFileEncodingError(p, $.NSUTF8StringEncoding, null).js); '"$js"'
+          $(JSON.stringify(d, null, 2) + "\n").writeToFileAtomicallyEncodingError(p, true, $.NSUTF8StringEncoding, null); }' \
+        "$f" "$CF" > /dev/null
+    elif command -v python3 > /dev/null 2>&1; then
+      python3 -c "import json, sys
+p, cf = sys.argv[1], sys.argv[2]
+d = json.load(open(p))
+$py
+open(p, 'w').write(json.dumps(d, indent=2) + '\n')" "$f" "$CF"
+    else
+      return 1
+    fi
+  }
+  # API-ONLY: no LLM listener (no router check), API routes only, the side services off.
+  APIJS='delete d.llmPort;
       d.external = d.external || {};
       d.external.api = Object.assign({ tiers: ["dde-auth"], timeoutSeconds: 60, maxBodyBytes: 1048576 },
                                      d.external.api || {}, { enabled: true, apiOnly: true });
@@ -1038,17 +1063,7 @@ if [ "$API" = 1 ]; then
       if (d.fleet) d.fleet.enabled = false;
       d.incoming = false; d.register = true;
       if (cf) d.reach = Object.assign({}, d.reach || {}, { mode: "cloudflared", bin: cf, workspacePort: 0 });'
-    NODEX="$HOME/.heia/runtime/node/bin/node"; [ -x "$NODEX" ] || NODEX="$(command -v node 2>/dev/null || true)"
-    if [ -n "$NODEX" ]; then
-      "$NODEX" -e 'const fs = require("fs"), [p, cf] = process.argv.slice(1);
-        const d = JSON.parse(fs.readFileSync(p, "utf8")); '"$APIJS"'
-        fs.writeFileSync(p, JSON.stringify(d, null, 2) + "\n");' "$CFG" "$CF" || die "could not write $CFG"
-    elif command -v python3 > /dev/null 2>&1; then
-      python3 - "$CFG" "$CF" <<'PY' || die "could not write $CFG"
-import json, sys
-p, cf = sys.argv[1], sys.argv[2]
-d = json.load(open(p))
-d.pop("llmPort", None)
+  APIPY='d.pop("llmPort", None)
 ext = d.setdefault("external", {})
 api = {"tiers": ["dde-auth"], "timeoutSeconds": 60, "maxBodyBytes": 1048576}
 api.update(ext.get("api") or {}); api.update({"enabled": True, "apiOnly": True}); ext["api"] = api
@@ -1059,22 +1074,40 @@ for s in ("node-red", "browser", "memory", "codememory"):
 if isinstance(d.get("fleet"), dict): d["fleet"]["enabled"] = False
 d["incoming"] = False; d["register"] = True
 if cf:
-    r = dict(d.get("reach") or {}); r.update({"mode": "cloudflared", "bin": cf, "workspacePort": 0}); d["reach"] = r
-open(p, "w").write(json.dumps(d, indent=2) + "\n")
-PY
-    elif [ "$OS" = "Darwin" ]; then
-      osascript -l JavaScript -e 'ObjC.import("Foundation");
-        function run(argv) { var p = argv[0], cf = argv[1] || "";
-          var d = JSON.parse($.NSString.stringWithContentsOfFileEncodingError(p, $.NSUTF8StringEncoding, null).js); '"$APIJS"'
-          $(JSON.stringify(d, null, 2) + "\n").writeToFileAtomicallyEncodingError(p, true, $.NSUTF8StringEncoding, null); }' \
-        "$CFG" "$CF" > /dev/null || die "could not write $CFG"
-    else
-      die "no node, python3 or osascript here to write $CFG"
-    fi
+    r = dict(d.get("reach") or {}); r.update({"mode": "cloudflared", "bin": cf, "workspacePort": 0}); d["reach"] = r'
+  # A SERVICE'S PORT, from its own arguments. The agent adopts and WATCHES a service already listening on
+  # its "port"; without one it cannot see the copy that is running, starts its own, and that one dies on the
+  # busy port forever ("exited with 1 — restarting") — seen with memory-search (`--serve-port 38475`).
+  PORTJS='if (d.services) Object.keys(d.services).forEach(function (k) { var s = d.services[k];
+        if (!s || s.port || !Array.isArray(s.args)) return;
+        ["--serve-port", "--port"].some(function (f) { var i = s.args.indexOf(f);
+          if (i >= 0 && /^[0-9]+$/.test(String(s.args[i + 1]))) { s.port = Number(s.args[i + 1]); return true; } return false; }); });'
+  PORTPY='for k, s in (d.get("services") or {}).items():
+    if not isinstance(s, dict) or s.get("port") or not isinstance(s.get("args"), list): continue
+    a = [str(x) for x in s["args"]]
+    for f in ("--serve-port", "--port"):
+        if f in a and a.index(f) + 1 < len(a) and a[a.index(f) + 1].isdigit():
+            s["port"] = int(a[a.index(f) + 1]); break'
+
+  if [ "$FRESH" = 1 ] || [ "$TRIM" = 1 ]; then
+    [ -f "$CFG" ] || die "no $CFG to write — install-agent should have created it (see /tmp/heia-install-agent.log)"
+    cp -p "$CFG" "$CFG.bak_$(date +%Y%m%d_%H%M%S)_pre_api"
+    api_edit "$CFG" "$APIJS $PORTJS" "$APIPY
+$PORTPY" || die "could not write $CFG (no node, python3 or osascript here)"
     chmod 600 "$CFG" 2>/dev/null
     ok "config: API only — no LLM listener, no router; node-red, browser, memory, code-memory and leaf runtime off"
   else
     grep -q '"apiOnly": *true' "$CFG" || note "config left as it is (not API-only yet) — run with --trim to switch the side services off"
+    # THE PORTS, on every run: a config written before this fix is repaired by a plain upgrade. Written
+    # (with a backup) only when something actually changes.
+    if [ -f "$CFG" ]; then
+      PT="$(mktemp)"; cp "$CFG" "$PT"
+      if api_edit "$PT" "$PORTJS" "$PORTPY" && ! cmp -s "$CFG" "$PT"; then
+        cp -p "$CFG" "$CFG.bak_$(date +%Y%m%d_%H%M%S)_pre_ports" && cat "$PT" > "$CFG"
+        ok "config: service ports added — the agent now adopts and watches what is already running"
+      fi
+      rm -f "$PT"
+    fi
   fi
 
   # --trim: the side services an earlier full setup started are separate processes; with the agent
