@@ -14,6 +14,44 @@ release**, then tells you what it updated. The manual steps below remain for ins
 
 ---
 
+## What this release adds (agent r36, harness engine r44, router r11, Activate 1.0.77)
+
+- **A sealed audit trail on the agent and the router.** Sign-ins, operation verdicts, turns (as hashes),
+  approvals, commands and agent-to-agent calls — on the router, access decisions and refusals — are written to a
+  chained trail sealed under that component's identity. `audit-export` verifies the chain and exports it;
+  `audit-sink set|test|off` streams it to a SIEM or log pipeline over HTTPS (no command shows the URL or the
+  header value). A heartbeat every five minutes, and security events such as refused keys, restored stores and
+  bursts of refusals.
+- **Configuration and integrity on record.** At start the agent and the router record the hash of their own
+  binary, the state of their controls and a fingerprint of their control files; a control file that changes
+  while they run is recorded with its old and new hash.
+- **Compliance reports.** `--compliance-info soc2|hipaa|eu-ai-act|dpdpa|all` (agent and router) reports from the
+  trail what is in place, partly in place or missing; the agent's `--access-review` lists who may sign in and
+  which agents may reach it, in both directions.
+- **Web search and web pages need one approval per chat** when the execution policy is enforced (agent r36 with
+  engine r44). The request is held once with the risk stated; after one approval the chat may use the web on all
+  sites. In audit mode the calls run and are logged; with the policy off nothing changes. HexaPilot jobs carry
+  the same choice as Web ON/OFF on the job card.
+- **HexaPilot** — a finished, stopped or failed job can be changed and run again in the same chat. The job store
+  is checked to open before every save, and a last-good copy (`hexapilot.he.lastgood`) is put back automatically
+  if the store stops opening.
+- **No leftover search services** — the harness search service stops by itself when its agent is gone, also
+  after a forced stop. **Staged start-up** — the agent starts its processes one at a time and opens its port last.
+- **The router no longer writes request bodies to a log file.**
+- **Optional: link an agent to your company's OAuth app.** `oauth-link set` stores the client ID and secret
+  encrypted on the machine; every message to another agent then carries a token from that app, and the receiver
+  checks it against a DNS TXT record on the sender's name and its own `clientid:` rule. Disabling the app in your
+  identity provider makes other agents refuse this one once the token it holds is used up (within an hour, as a
+  token is reused for at most an hour). The token must only prove that the agent is
+  still authorised: a token that grants app roles, API permissions or extra scopes is refused — `set` saves
+  nothing, and a held token is never sent. Nothing changes unless you set it up.
+- **Activate** — 1.0.76 added `fix-store`, which checks a sealed store (`.he`) that no longer opens and can
+  remove one bad entry, restore a copy or set the file aside; 1.0.77 carries this release as its built-in
+  fallback. Updating the tool is optional for this release.
+- Unchanged: workspace r40, mindmapchat engine r21, local vision models r43.
+
+Upgrade: re-run the one-command installer (it updates the router, the agent and the harness engine).
+
 ## What this release adds (router r10)
 
 - **Upstream keys are sealed in `upstreams.yaml`.** On its first start the router replaces every plain provider
