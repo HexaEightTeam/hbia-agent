@@ -14,6 +14,47 @@ release**, then tells you what it updated. The manual steps below remain for ins
 
 ---
 
+## What this release adds (agent r37, workspace r41, router r12, Activate 1.0.78)
+
+- **The agent checks its stores before it starts.** Before its port opens, the agent opens every encrypted store it
+  keeps. One that does not open gets its key fetched again — three times, 20 seconds apart. If it still does not
+  open, the agent does not start and says which file and what to do: start it again, or — when a last-good copy of
+  that file opens — put the copy back with `restore-store <file>` (it asks before changing anything, refuses while
+  the agent is running, and keeps the file that did not open). Exit codes: 75 (a key could not be had), 65 (a file
+  is damaged), 78 (the folder's stores belong to another identity). `startup-check.json` records the last start, and
+  `check-stores` runs the same check from a terminal without changing anything.
+- **Upgrades start as before.** A store that did not open before this version is reported with a warning and left
+  untouched, and the agent starts. The preferences store is set aside and written again if it does not open.
+- **Two last-good copies of every store** (`.lastgood`, `.lastgood.2`), and **one key from the platform per start**:
+  the keys that opened the stores are kept, sealed, in `keyring.he`. **The first start after this upgrade takes
+  longer** — about one to two minutes on a machine with many stores — while every key is fetched once.
+- **Idle sign-out.** The workspace signs a person out after a time without activity: 15 minutes by default on a
+  business licence, 8 hours on a personal one. Set `sessionIdleMinutes` in `hexaeight-agent.json` (0 turns it off;
+  at most 1440).
+- **Privacy notice and consent withdrawal.** On a business licence the terms include a privacy notice, and a Privacy
+  link in the workspace's status bar lets a person withdraw consent; they accept the terms again to continue. Put
+  your own notice in `privacy-notice.txt` beside the agent to replace the standard text; `"privacyNotice": true` or
+  `false` in `hexaeight-agent.json` overrides the default (off on a personal licence).
+- **AI notice.** A line under the message box says the person is working with an AI system; chat exports are
+  labelled as AI-generated.
+- **Who asked, across agents.** An agent that receives a forwarded request takes the original caller into account
+  only under a rule `<forwarder>,forward:<caller>,inbound,allow` that names the forwarder; a deny rule wins. Every
+  call between agents carries a request id, recorded in the audit trails on both sides.
+- **OAuth link timing and API routes.** `oauth-link max-age` (how old a token this agent accepts, 5–120 minutes) and
+  `oauth-link renew` (how often it fetches a new one, 1–60 minutes). `add-api --secret-header` asks for the header
+  value at a prompt that does not echo; an API route can use its own OAuth client (client credentials).
+- **A clean stop.** A stop request (SIGTERM) stops the agent's helper processes and lets it save its stores first.
+- **Router r12** — the HIPAA compliance report's business-associate line says what to do.
+- **Activate 1.0.78** — `renewtoken` and `newtoken` point every other folder that hard-links the identity's
+  `env-file` at the renewed one once the licence verifies (linked, never copied) and list them; agents started from
+  those folders keep the previous licence until they are restarted. Both ask whether the licence is yearly, and
+  `verify-license` prints the licence's probable end (an estimate: the platform does not report it). Update the tool
+  before your next renewal; it is not needed to install this release.
+- **Sign in to the workspace once after updating** — its background worker changed.
+- Unchanged: harness engine r44, mindmapchat engine r21, local vision models r43.
+
+Upgrade: re-run the one-command installer (it updates the agent, the workspace and the router).
+
 ## What this release adds (agent r36, harness engine r44, router r11, Activate 1.0.77)
 
 - **A sealed audit trail on the agent and the router.** Sign-ins, operation verdicts, turns (as hashes),
