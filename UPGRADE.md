@@ -14,6 +14,22 @@ release**, then tells you what it updated. The manual steps below remain for ins
 
 ---
 
+## What this release adds (agent r38, workspace r42)
+
+- **Deletes from the workspace are recorded in the audit trail.** Deleting a memory (Memory) or a recorded mission
+  (Mission Runner) goes through the agent, which records each one against the signed-in person — `memory.delete` or
+  `mission.delete`, with the name, whether it was a mission, its card count and the outcome, refusals included. The
+  workspace's memory service deletes only when the agent asks; any other delete is refused.
+- **Mission Runner lists your recorded missions, each with its runs.** The missions run most recently come first, with
+  the run chats that ran each one beneath it; runs with no mission on record are listed last, as orphaned. Missions now
+  lists only the chats that build missions.
+- **Delete recorded missions** — one from its page, or several at once with **select** in Mission Runner's list. Each
+  asks first, in the page. The documents a mission searches are not touched; its runs stay, listed as orphaned.
+- **Sign in to the workspace once after updating** — its background worker changed.
+- Unchanged: router r12, harness engine r44, mindmapchat engine r21, local vision models r43. No new Activate is needed.
+
+Upgrade: re-run the one-command installer (it updates the agent and the workspace together — the deletes need both).
+
 ## What this release adds (agent r37, workspace r41, router r12, Activate 1.0.78)
 
 - **The agent checks its stores before it starts.** Before its port opens, the agent opens every encrypted store it
