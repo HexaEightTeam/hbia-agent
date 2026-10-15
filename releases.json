@@ -75,21 +75,21 @@
   },
   "engine-harness": {
     "repo": "HexaEightTeam/hbia-agent",
-    "tag": "v2026.10.11-r44",
+    "tag": "v2026.10.15-r45",
     "assets": {
       "win-x64": {
         "file": "hexaeight-engine-win-x64.exe",
-        "sha256": "34969EB6D6076987F32AC233BABFD3E54116F1EEAC55B9210EE4D370A23C6CC6",
+        "sha256": "C1EEF7B96967943FE888D80BF02A41D22D59B199665F377AB1F901599D09FF9D",
         "protection": ""
       },
       "linux-x64": {
         "file": "hexaeight-engine-linux-x64",
-        "sha256": "8CA10D1FAD634DF6316BA17812CA7300C582A4FA3090CBC547A4D28CA1D8E445",
+        "sha256": "AD222568E2EBEA7EE0AECE2A73BD5D23745542BD3BA9F9EA7FE255961D5B91A2",
         "protection": ""
       },
       "osx-arm64": {
         "file": "hexaeight-engine-osx-arm64",
-        "sha256": "9FAC69BF21FC78B5C4067B7B6DD035E0391D52385BE8479342C449B05C2FDE00",
+        "sha256": "B1BE0E4E42A9EFAA3776FD83DA09EC8ABFC411B4B0D24956F7A9B258FBEB1820",
         "protection": ""
       }
     }

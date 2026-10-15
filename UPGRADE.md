@@ -14,6 +14,23 @@ release**, then tells you what it updated. The manual steps below remain for ins
 
 ---
 
+## What this release adds (harness engine r45)
+
+- **Answers can be held to a mission's sources.** A mission opts in with a `source-of-truth` card. Before an answer is
+  shown, the harness checks it against the mission's sources: a document it cites must be in the sources with its text
+  and its document, a name it gives as a source must match one, and a quote must appear in the source's text. When a
+  check fails, the model is asked to correct its answer; whatever still has no source is then removed, and when nothing
+  is left the answer says the information is not available.
+- **Only documents that passed are attached.** Under the card, the documents shown with an answer are only those of
+  sources that passed the check.
+- **References resolved by the harness.** The card can set a reference marker. The harness resolves each marked
+  reference, fetches the document itself and shows it by name, with its document.
+- Missions without the card work as before.
+- Unchanged: agent r38, workspace r42, router r12, mindmapchat engine r21, local vision models r43. No new Activate is
+  needed.
+
+Upgrade: re-run the one-command installer (it updates only the harness engine).
+
 ## What this release adds (agent r38, workspace r42)
 
 - **Deletes from the workspace are recorded in the audit trail.** Deleting a memory (Memory) or a recorded mission
