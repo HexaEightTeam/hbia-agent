@@ -14,6 +14,20 @@ release**, then tells you what it updated. The manual steps below remain for ins
 
 ---
 
+## What this release adds (harness engine r46)
+
+- **One result per document, when a memory asks for it.** A memory or group opts in with `"distinct": true` in its
+  `search.json`. A search then scores a larger pool of passages, groups them by document and returns the top documents,
+  each once, with its best passage. A document that matches in several places ranks higher, without length alone
+  carrying it. Memories without the setting search as before.
+- **Rules found in a section of a card count as the card.** Long cards are split into sections, and a card's header can
+  sit in a different section from its rules. A mission answer that retrieved a card's rules from one of its sections is
+  no longer set aside as "no card retrieved". The mission map still does not count as a card.
+- Unchanged: agent r38, workspace r42, router r12, mindmapchat engine r21, local vision models r43. No new Activate is
+  needed.
+
+Upgrade: re-run the one-command installer (it updates only the harness engine).
+
 ## What this release adds (harness engine r45)
 
 - **Answers can be held to a mission's sources.** A mission opts in with a `source-of-truth` card. Before an answer is
