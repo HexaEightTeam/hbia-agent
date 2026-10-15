@@ -14,6 +14,26 @@ release**, then tells you what it updated. The manual steps below remain for ins
 
 ---
 
+## What this release adds (harness engine r47)
+
+- **Missions start where their map starts.** When a mission's flowchart shows which card a question enters at, the
+  harness names that card to the model up front and checks that it was read. If the answer read other cards but not
+  that one, the model is sent back once to read it and follow its steps; a second miss lets the answer through as
+  before. Missions whose map shows no entry card work as before.
+- **A short answer card that stops before its end is asked for again.** Previously such a card was closed and shown,
+  so half an answer could look complete. A short card cut off before its end is now requested in full; the last try
+  still keeps what was written. Long cards are handled as before.
+- **Source checks remove less.** Under a `source-of-truth` card, the harness now removes only the sentences that carry
+  an unsupported item, not the whole section around them; a section, list item or cell is dropped only when nothing
+  of it is left.
+- **Name matching is fairer.** A name given as a source is compared on the words next to the separator only, so words
+  in front of it no longer count against it, and one misspelt letter in a long word no longer makes it a different
+  name.
+- Unchanged: agent r38, workspace r42, router r12, mindmapchat engine r21, local vision models r43. No new Activate is
+  needed.
+
+Upgrade: re-run the one-command installer (it updates only the harness engine).
+
 ## What this release adds (harness engine r46)
 
 - **One result per document, when a memory asks for it.** A memory or group opts in with `"distinct": true` in its
