@@ -14,6 +14,29 @@ release**, then tells you what it updated. The manual steps below remain for ins
 
 ---
 
+## What this release adds (harness engine r48)
+
+- **Cards read earlier in a conversation still count.** A mission answer that follows a card the conversation already
+  retrieved in an earlier question is no longer sent back as "no card retrieved", and no longer replaced with an
+  out-of-scope reply. This is checked against what the conversation actually retrieved, read from its own transcript.
+  A round in which the model says it is about to look something up is given that round instead of being declined.
+- **Sources read earlier in a conversation can be named exactly.** Under a `source-of-truth` card, when the model names
+  a source it read in an earlier question as plain text, the correction now tells it the exact reference to write, so
+  the source is not lost. The source is still checked against its own text as before.
+- **A broken answer card no longer loses words.** When an answer card is malformed, the harness's rebuild is now
+  measured against all the words of the card, not just the parts it could read. A rebuild that would drop words is not
+  shown; the model is asked again, and on the last try every word goes out as text.
+- **Reference text in a link field is kept.** A link the page cannot open is shown as text in its item instead of being
+  dropped, so a source reference written there is not lost.
+- **Documents attached only while the answer cites them.** Documents the harness fetched itself to check a draft are
+  attached only if the final answer still cites them.
+- **Quotes from extracted text match.** A quote is compared with its source without spaces, so a word that text
+  extraction split in two still matches. The quote still has to be in a source the answer read.
+- Unchanged: agent r38, workspace r42, router r12, mindmapchat engine r21, local vision models r43. No new Activate is
+  needed.
+
+Upgrade: re-run the one-command installer (it updates only the harness engine).
+
 ## What this release adds (harness engine r47)
 
 - **Missions start where their map starts.** When a mission's flowchart shows which card a question enters at, the
