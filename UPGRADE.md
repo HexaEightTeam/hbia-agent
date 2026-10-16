@@ -14,6 +14,16 @@ release**, then tells you what it updated. The manual steps below remain for ins
 
 ---
 
+## What this release adds (harness engine r49)
+
+- **Scanned PDFs with no text layer can be added to a memory.** When a memory is ingested with garbled-page skipping or
+  OCR on, a PDF that is only page images no longer fails the add. Its pages are marked for OCR, which reads them, or the
+  file is listed in `ocr-needed.txt`. Without those options, such a PDF is reported as before.
+- Unchanged: agent r38, workspace r42, router r12, mindmapchat engine r21, local vision models r43. No new Activate is
+  needed.
+
+Upgrade: re-run the one-command installer (it updates only the harness engine).
+
 ## What this release adds (harness engine r48)
 
 - **Cards read earlier in a conversation still count.** A mission answer that follows a card the conversation already
