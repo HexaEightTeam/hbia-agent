@@ -96,6 +96,10 @@ TTY=/dev/tty
 # THIS USER'S LOGS. /tmp is shared by every user of the machine: a second install could neither write the first
 # one's files nor should it ever read them.
 LOGD="$HOME/.heia/logs/install"; mkdir -p "$LOGD"
+# THIS USER'S TEMP FOLDER. Activate (and every .NET or node program started from here) writes its temporary
+# files under TMPDIR — with fixed names (engine-<name>.json). In the shared /tmp a second user's install hits
+# the first one's files ("Access to the path '/tmp/engine-claude.json' is denied") and could read them.
+export TMPDIR="$HOME/.heia/tmp"; mkdir -p "$TMPDIR"; chmod 700 "$TMPDIR" 2>/dev/null
 
 # ── output ────────────────────────────────────────────────────────────────────────────────────────
 if [ -t 1 ]; then B=$'\e[1m'; G=$'\e[32m'; Y=$'\e[33m'; R=$'\e[31m'; C=$'\e[36m'; N=$'\e[0m'; else B= G= Y= R= C= N=; fi
@@ -918,6 +922,7 @@ P_AGENT="$(pget agent)";   P_AGENT="${P_AGENT:-8770}"
 P_WS="$(pget workspace)";  P_WS="${P_WS:-5620}"
 ROUTER_SHARED="$(pget router_shared)"            # yes: the router is another instance's — not ours to run
 LOGS="$HOME/.heia/logs"; mkdir -p "$LOGS"
+export TMPDIR="$HOME/.heia/tmp"; mkdir -p "$TMPDIR"   # this user's temp folder — never the shared /tmp
 CLAIM="/var/tmp/hexaeight-instances/$INST"
 claim_touch() { [ -f "$CLAIM" ] && [ "$(sed -n 's/^user=//p' "$CLAIM" | tail -1)" = "$(id -un)" ] && touch "$CLAIM" 2>/dev/null; true; }
 if [ "$OS" = "Darwin" ]; then RBIN=hexaeight-router-osx-arm64; else RBIN=hexaeight-router-linux-x64; fi
@@ -2214,7 +2219,7 @@ else
     } > "$UNITS_L/hexaeight-agent.service.d/wait-for-router.conf"
   fi
   # A ROUTER OF ITS OWN ON ANOTHER PORT: systemd starts it with LLM_ROUTER_PORT (the router reads its port from it).
-  if [ "$MANAGER" = systemd ] && [ "$MODE" = own ] && [ "$P_ROUTER" != ${P_ROUTER} ]; then
+  if [ "$MANAGER" = systemd ] && [ "$MODE" = own ] && [ "$P_ROUTER" != 5100 ]; then
     mkdir -p "$UNITS_L/hexaeight-router.service.d"
     printf '%s\n' "# Written by the HexaEight installer: this instance's router port." "[Service]" "Environment=LLM_ROUTER_PORT=$P_ROUTER" \
       > "$UNITS_L/hexaeight-router.service.d/port.conf"
@@ -2226,6 +2231,12 @@ else
     printf '%s\n' "# Written by the HexaEight installer: how long this agent waits for ANOTHER agent's answer." \
                   "[Service]" "Environment=HEIA_ASK_TIMEOUT_SECONDS=$HEIA_ASK_TIMEOUT_SECONDS" \
       > "$UNITS_L/hexaeight-agent.service.d/ask-timeout.conf"
+    # THIS USER'S TEMP FOLDER for the services too (see TMPDIR near the top): a unit does not inherit it.
+    for u in agent router workspace; do
+      mkdir -p "$UNITS_L/hexaeight-$u.service.d"
+      printf '%s\n' "# Written by the HexaEight installer: this user's temp folder, never the shared /tmp." \
+                    "[Service]" "Environment=TMPDIR=$TMPDIR" > "$UNITS_L/hexaeight-$u.service.d/tmpdir.conf"
+    done
   fi
   NOWS=""; [ "${WS_OWN:-yes}" = no ] && NOWS="--no-workspace"
   # a router elsewhere (or another instance's): no router unit here — a second instance must never pick up ~/hbia-router
