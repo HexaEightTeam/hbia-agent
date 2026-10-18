@@ -2290,8 +2290,7 @@ if [ "$EXTERNAL_ONLY" = 1 ]; then
   cat <<EOF
   ${G}${B}Done.${N}  ${B}$NAME${N} is an external agent: other agents ask it by name and it answers with its mission.
 
-  Folders:  $(short "$LIC")   the licence — never move or rename it
-            $(short "$ROUTER")   the router (your provider key is in upstreams.yaml)
+  Folders:  $(short "$LIC")   the licence — never move or rename it$([ "$MODE" = own ] && printf '\n            %s   the router (your provider key is in upstreams.yaml)' "$(short "$ROUTER")")
             $(short "$AGENT")   the agent
             $(short "$AGENT")-external   its mission, in its own store
   Manage:   ${B}heia status${N} · ${B}heia restart${N} [agent|router|all] · ${B}heia logs${N} [agent|router]
@@ -2305,16 +2304,34 @@ spin_done
 if [ -n "$UPDATES" ]; then printf '\n  %sUpdated this run%s (only what had a newer release):\n%s' "$B" "$N" "$UPDATES"
 elif [ "$RERUN" = 1 ] && [ -n "$REL" ]; then printf '\n  Everything was already on its current release — nothing downloaded.\n'
 elif [ "$RERUN" = 1 ]; then printf '\n  %s!%s The release list could not be read, so nothing was checked for updates.\n' "$Y" "$N"; fi
-OPEN="${WS_URL:-http://localhost:${P_WS}}"
+if [ "${WS_OWN:-yes}" = no ]; then
+  # NO WORKSPACE OF ITS OWN: the one already on this machine (another instance's claim names its port)
+  OWS=""; for n in 0 1 2 3 4 5 6 7 8 9; do
+    [ "$n" = "$INST" ] && continue; p="$(claim_get "$n" workspace_port)"
+    [ -n "$p" ] && [ "$p" != 0 ] && { OWS="$p"; break; }
+  done
+  OPEN="http://localhost:${OWS:-5620}"
+  DONE_LINE="In the workspace already on this machine (${B}$OPEN${N}, or its public address), sign in to
+  ${B}$NAME${N} as ${B}$OWNER${N} with your Authenticator."
+else
+  OPEN="${WS_URL:-http://localhost:${P_WS}}"
+  DONE_LINE="Open ${B}$OPEN${N} and sign in as ${B}$OWNER${N} with your Authenticator."
+fi
+# the router line and the router in "Manage" only when this install runs one
+if [ "$MODE" = own ]; then
+  ROUTER_LINE="
+            $(short "$ROUTER")   the router (your provider key is in upstreams.yaml)"; MANAGE_SVC="[agent|router|all]"; LOG_SVC="[agent|router]"
+else
+  ROUTER_LINE=""; MANAGE_SVC="[agent|all]"; LOG_SVC="[agent]"
+fi
 cat <<EOF
 
-  ${G}${B}Done.${N}  Open ${B}$OPEN${N} and sign in as ${B}$OWNER${N} with your Authenticator.
+  ${G}${B}Done.${N}  $DONE_LINE
   Ask it something — an answer in the browser proves the whole chain.
 
-  Folders:  $(short "$LIC")   the licence — never move or rename it
-            $(short "$ROUTER")   the router (your provider key is in upstreams.yaml)
+  Folders:  $(short "$LIC")   the licence — never move or rename it$ROUTER_LINE
             $(short "$AGENT")   the agent
-  Manage:   ${B}heia status${N} · ${B}heia restart${N} [agent|router|all] · ${B}heia logs${N} [agent|router]
+  Manage:   ${B}heia status${N} · ${B}heia restart${N} $MANAGE_SVC · ${B}heia logs${N} $LOG_SVC
             (from any folder, in a new terminal — or after: source ${RCFILE})
 EOF
 [ -n "$MANAGER" ] && cat <<EOF
