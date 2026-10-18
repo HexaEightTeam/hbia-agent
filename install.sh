@@ -40,6 +40,13 @@
 # later plain re-run upgrades it as an API agent again. --trim (existing machines) also switches off the
 # side services an earlier, full setup left on. --allow <agent> names an agent that may call it.
 #     curl -fsSL …/install.sh | bash -s -- --api [--agent-dir ~/case-agent] [--trim] [--allow <agent>]
+#
+# MORE THAN ONE INSTALL ON ONE MACHINE — one per OS user, each with its own ports: --instance auto (or 1-9),
+# on the FIRST run of that user (or HEIA_INSTANCE=auto in the environment). It asks whether this agent gets
+# its own router and workspace or uses the ones already on this machine. The ports are recorded in
+# instance.ports (the agent folder, the router folder, ~/.heia) and every later run, upgrade and `heia`
+# uses them — and only them.
+#     curl -fsSL …/install.sh | bash -s -- --instance auto
 # ──────────────────────────────────────────────────────────────────────────────────────────────────
 set -u
 
@@ -47,6 +54,7 @@ SKIP_GATEWAY=0
 AGENT_DIR_ARG=""; ROUTER_DIR_ARG=""; LIC_DIR_ARG=""; RESET_POLICY=0; API=0; TRIM=0
 ADD_EXTERNAL=""
 ALLOW=""
+INSTANCE_ARG=""
 ARGS_TEXT=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -62,8 +70,10 @@ while [ $# -gt 0 ]; do
     --reset-router-policy) RESET_POLICY=1; ARGS_TEXT="$ARGS_TEXT --reset-router-policy" ;;
     --api)  API=1;  ARGS_TEXT="$ARGS_TEXT --api" ;;
     --trim) TRIM=1; ARGS_TEXT="$ARGS_TEXT --trim" ;;
+    --instance) INSTANCE_ARG="${2:-}"; [ -n "$INSTANCE_ARG" ] || { printf '  --instance needs auto or a number 0-9\n'; exit 1; }
+                ARGS_TEXT="$ARGS_TEXT --instance $INSTANCE_ARG"; shift ;;
     -h|--help) sed -n '2,45p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) printf '  unknown option: %s  (known: --skip-gateway, --add-external <mission.zip|framework>, --allow <agent>,\n   --agent-dir, --router-dir, --licence-dir <folder>, --reset-router-policy, --api, --trim)\n' "$1"; exit 1 ;;
+    *) printf '  unknown option: %s  (known: --skip-gateway, --add-external <mission.zip|framework>, --allow <agent>,\n   --agent-dir, --router-dir, --licence-dir <folder>, --reset-router-policy, --api, --trim, --instance <auto|0-9>)\n' "$1"; exit 1 ;;
   esac
   shift
 done
@@ -83,6 +93,9 @@ ROUTER="$HOME/heia-router"
 AGENT="$HOME/heia-agent"
 STATE="$HOME/.heia/install.state"
 TTY=/dev/tty
+# THIS USER'S LOGS. /tmp is shared by every user of the machine: a second install could neither write the first
+# one's files nor should it ever read them.
+LOGD="$HOME/.heia/logs/install"; mkdir -p "$LOGD"
 
 # ── output ────────────────────────────────────────────────────────────────────────────────────────
 if [ -t 1 ]; then B=$'\e[1m'; G=$'\e[32m'; Y=$'\e[33m'; R=$'\e[31m'; C=$'\e[36m'; N=$'\e[0m'; else B= G= Y= R= C= N=; fi
@@ -127,18 +140,18 @@ else activate_bg() { nohup hexaeight-activate "$@" < /dev/null; }; fi
 # minute when Cloudflare gives no address and it falls back to the relay), so the wait is long. And one
 # start in a while dies at once — "engines.he did not decrypt" (a bad key drawn on that start; seen on
 # the Mac and on WSL, the next start is fine) — so a crash is simply started again, up to 3 times.
-agent_start() {   # agent_start "what the spinner says" -> 0 once :8770 answers
+agent_start() {   # agent_start "what the spinner says" -> 0 once :${P_AGENT} answers
   local try i why
   for try in 1 2 3; do
     spin "$1"
-    ( cd "$AGENT" && activate_bg restart agent > /tmp/heia-agent-start.log 2>&1 )
+    ( cd "$AGENT" && activate_bg restart agent > ${LOGD}/heia-agent-start.log 2>&1 )
     for i in $(seq 1 90); do
-      listening 8770 && return 0
-      pgrep -f "$AGENT/$ABIN\$" > /dev/null 2>&1 || break   # gone: it crashed on start
+      listening ${P_AGENT} && return 0
+      pgrep -u "$(id -u)" -f "$AGENT/$ABIN\$" > /dev/null 2>&1 || break   # gone: it crashed on start
       sleep 2
     done
     why="$(grep -a -m1 'Unhandled exception' "$AGENT/agent.log" 2>/dev/null | cut -c1-140)"
-    [ "$try" -lt 3 ] && note "the agent did not come up (${why:-no answer on :8770}) — starting it again ($((try + 1))/3)"
+    [ "$try" -lt 3 ] && note "the agent did not come up (${why:-no answer on :${P_AGENT}}) — starting it again ($((try + 1))/3)"
   done
   return 1
 }
@@ -160,7 +173,8 @@ listening() { if [ "$OS" = "Darwin" ]; then lsof -nP -iTCP:"$1" -sTCP:LISTEN >/d
 abs_dir() { local d="${1/#\~/$HOME}"; d="${d%/}"; case "$d" in /*) ;; *) d="$PWD/$d";; esac; printf '%s' "$d"; }
 running_dir() {   # running_dir <binary name> -> folder of the running main process (not its mcp children)
   local pid p
-  for pid in $(pgrep -x "$1" 2>/dev/null) $(pgrep -f "/$1\$" 2>/dev/null); do
+  # THIS USER'S processes only: another install on this machine runs the same binaries under its own user
+  for pid in $(pgrep -u "$(id -u)" -x "$1" 2>/dev/null) $(pgrep -u "$(id -u)" -f "/$1\$" 2>/dev/null); do
     p="$(ps -o args= -p "$pid" 2>/dev/null)"; [ "${p#* }" = "$p" ] || continue   # has arguments: a child
     case "$p" in
       /*) dirname "$p"; return 0 ;;
@@ -192,6 +206,148 @@ fi
 [ "$API" != 1 ] && [ "$(state_get role)" = api ] && API=1
 same_dir() { [ "$(cd "$1" 2>/dev/null && pwd -P)" = "$(cd "$2" 2>/dev/null && pwd -P)" ]; }
 short() { case "$1" in "$HOME"/*) printf '~%s' "${1#"$HOME"}" ;; *) printf '%s' "$1" ;; esac; }   # ~/x for display
+
+# ══ THE INSTANCE — which set of ports this install uses ════════════════════════════════════════════════
+# One install per OS user; several users can each have one on the same machine. Instance N uses every
+# default port + 100 x N (instance 0 = the defaults, what every install used before). The number is chosen
+# ONCE, on the first run (--instance auto|N or HEIA_INSTANCE), recorded in install.state and in instance.ports,
+# and every later run keeps it. Nothing in this script, in `heia` or in what they start uses another port.
+#
+# CLAIMS. A port that is free NOW may belong to an instance that is only stopped. Every install claims its
+# number in a machine-wide folder (/var/tmp, so no administrator is needed; the claim is refreshed by every
+# run and every `heia start/restart`, so no tmp cleaner ages it out). auto takes the first number that no
+# other user claims and whose ports are all free.
+DEF_PORTS="router=5100 agent=8770 llm=8899 mcp=8902 bind=8903 extmcp=8904 qwen=8890 mstate=8908 fleet=8909 pilot=8911 leaf=8907 nodered=1880 workspace=5620 browser=5623 memory=5624 codemem=5625"
+CLAIMS=/var/tmp/hexaeight-instances
+port_for() {   # port_for <name> <instance> -> the port
+  local kv; for kv in $DEF_PORTS; do [ "${kv%%=*}" = "$1" ] && { echo $(( ${kv#*=} + 100 * $2 )); return 0; }; done; return 1; }
+claim_get() { [ -f "$CLAIMS/$1" ] && sed -n "s/^$2=//p" "$CLAIMS/$1" | tail -1; }
+claimed_by_other() { [ -f "$CLAIMS/$1" ] && [ "$(claim_get "$1" user)" != "$(id -un)" ]; }
+ports_free() {   # ports_free <instance> -> 0 when nothing listens on any of its ports
+  local kv; for kv in $DEF_PORTS; do listening "$(( ${kv#*=} + 100 * $1 ))" && return 1; done; return 0; }
+INST="$(state_get instance)"
+REQ_INST="${INSTANCE_ARG:-${HEIA_INSTANCE:-}}"
+if [ -n "$INST" ]; then
+  case "$REQ_INST" in ""|auto|"$INST") ;;
+    *) die "this install is instance $INST — its ports cannot change. Another instance is another OS user's install." ;; esac
+elif [ -z "$REQ_INST" ]; then
+  INST=0
+  claimed_by_other 0 && die "another install on this machine (user $(claim_get 0 user)) uses the default ports.
+  Install this one as a separate instance:  curl -fsSL https://raw.githubusercontent.com/HexaEightTeam/hbia-agent/main/install.sh | bash -s -- --instance auto"
+else
+  case "$REQ_INST" in
+    auto) INST=""
+          for n in 0 1 2 3 4 5 6 7 8 9; do
+            claimed_by_other "$n" && continue
+            # ours already (a first run that stopped at the licence) — or free on every port
+            { [ -f "$CLAIMS/$n" ] || ports_free "$n"; } && { INST="$n"; break; }
+          done
+          [ -n "$INST" ] || die "no free instance number (0-9) on this machine" ;;
+    [0-9]) INST="$REQ_INST"
+           claimed_by_other "$INST" && die "instance $INST is user $(claim_get "$INST" user)'s install — choose another number, or --instance auto"
+           [ -f "$CLAIMS/$INST" ] || ports_free "$INST" || die "a port of instance $INST is already in use on this machine — choose another number, or --instance auto" ;;
+    *) die "--instance takes auto or a number 0-9" ;;
+  esac
+fi
+state_set instance "$INST"
+P_ROUTER=$(port_for router "$INST");   P_AGENT=$(port_for agent "$INST");     P_LLM=$(port_for llm "$INST")
+P_MCP=$(port_for mcp "$INST");         P_BIND=$(port_for bind "$INST");       P_EXTMCP=$(port_for extmcp "$INST")
+P_QWEN=$(port_for qwen "$INST");       P_MSTATE=$(port_for mstate "$INST");   P_FLEET=$(port_for fleet "$INST")
+P_PILOT=$(port_for pilot "$INST");     P_LEAF=$(port_for leaf "$INST");       P_NODERED=$(port_for nodered "$INST")
+P_WS=$(port_for workspace "$INST");    P_BROWSER=$(port_for browser "$INST"); P_MEMORY=$(port_for memory "$INST")
+P_CODEMEM=$(port_for codemem "$INST")
+# the router this instance's agent talks to: its own (P_ROUTER) — or another instance's on this machine (shared)
+P_ROUTER_USE="$P_ROUTER"
+# THE PORT FILE, in each folder of this instance: whatever runs there (this script, heia, Activate, a person)
+# reads its ports from the folder it is in — never guesses them from what happens to be listening.
+write_ports() {   # write_ports <folder>...
+  local d
+  for d in "$@"; do
+    [ -d "$d" ] || continue
+    { echo "# This install's ports (instance $INST, user $(id -un)) — written by the HexaEight installer; do not edit."
+      echo "instance=$INST"; echo "user=$(id -un)"
+      echo "router=$P_ROUTER_USE"; [ "$P_ROUTER_USE" != "$P_ROUTER" ] && echo "router_shared=yes"
+      echo "agent=$P_AGENT"; echo "llm=$P_LLM"; echo "mcp=$P_MCP"; echo "bind=$P_BIND"; echo "extmcp=$P_EXTMCP"
+      echo "qwen=$P_QWEN"; echo "mstate=$P_MSTATE"; echo "fleet=$P_FLEET"; echo "pilot=$P_PILOT"; echo "leaf=$P_LEAF"
+      echo "nodered=$P_NODERED"; echo "workspace=$P_WS"; echo "browser=$P_BROWSER"; echo "memory=$P_MEMORY"; echo "codemem=$P_CODEMEM"
+    } > "$d/instance.ports.tmp" && mv "$d/instance.ports.tmp" "$d/instance.ports"
+  done
+}
+claim_write() {   # what other installs on this machine may know about this one (no secrets)
+  if [ ! -d "$CLAIMS" ]; then mkdir -p "$CLAIMS" 2>/dev/null && chmod 1777 "$CLAIMS" 2>/dev/null; fi
+  [ -w "$CLAIMS" ] || { warn "cannot write $CLAIMS — other installs on this machine will not see this one (an administrator runs: sudo mkdir -p $CLAIMS && sudo chmod 1777 $CLAIMS)"; return 0; }
+  { echo "instance=$INST"; echo "user=$(id -un)"; echo "home=$HOME"; echo "agent_identity=$(state_get identity)"
+    echo "router_port=$P_ROUTER_USE"; echo "router_shared=$([ "$P_ROUTER_USE" != "$P_ROUTER" ] && echo yes || echo no)"
+    echo "router_identity=$(state_get router_identity)"; echo "route=$(state_get route_used)"; echo "model=$(state_get model)"
+    echo "workspace_port=$([ "$(state_get workspace_own)" = no ] && echo 0 || echo "$P_WS")"; echo "updated=$(date -u +%FT%TZ)"
+  } > "$CLAIMS/$INST.tmp" && chmod 644 "$CLAIMS/$INST.tmp" && mv "$CLAIMS/$INST.tmp" "$CLAIMS/$INST"
+}
+claim_write
+[ "$INST" != 0 ] && ok "instance $INST — this install's ports: agent $P_AGENT, workspace $P_WS, memory $P_MEMORY (all default + $((100 * INST)))"
+
+# THIS INSTANCE'S PORTS INTO WHAT IT RUNS. Activate writes the defaults (agent 8770, llm 8899, node-red 1880,
+# memory 5624 ...); for instance N they are rewritten here after every Activate step that writes them —
+# install-agent and install-workspace both renew their own fields on every run. Instance 0: nothing to do.
+cfg_node() { local n="$HOME/.heia/runtime/node/bin/node"; [ -x "$n" ] || n="$(command -v node 2>/dev/null || true)"; printf '%s' "$n"; }
+apply_ports() {   # apply_ports <agent config>
+  [ "$INST" = 0 ] && return 0
+  local cfg="$1" nodex; [ -f "$cfg" ] || return 0
+  nodex="$(cfg_node)"; [ -n "$nodex" ] || die "no node runtime to write this instance's ports into $cfg"
+  cp -p "$cfg" "$cfg.bak_$(date +%Y%m%d_%H%M%S)_pre_instance_ports"
+  "$nodex" -e '
+    const fs = require("fs"), [p, ...kv] = process.argv.slice(1);
+    const P = {}; for (const x of kv) { const i = x.indexOf("="); P[x.slice(0, i)] = Number(x.slice(i + 1)); }
+    const d = JSON.parse(fs.readFileSync(p, "utf8"));
+    d.port = P.agent; if (d.llmPort) d.llmPort = P.llm;
+    d.sharedMcpPort = P.mcp; d.bindPort = P.bind; d.externalMcpPort = P.extmcp; d.qwenPort = P.qwen;
+    d.missionStatePort = P.mstate; d.pilotPort = P.pilot; d.leafRuntimePort = P.leaf;
+    if (d.fleet) { d.fleet.port = P.fleet;
+      if (Array.isArray(d.fleet.origins)) d.fleet.origins = d.fleet.origins.map((o) => o.replace(/:5620$/, ":" + P.workspace)); }
+    if (d.reach && d.reach.workspacePort) d.reach.workspacePort = P.workspace;
+    const S = d.services || {};
+    const svc = (k, envName, v) => { const x = S[k]; if (!x) return; x.port = v;
+      if (envName) { x.env = Object.assign({}, x.env || {}); x.env[envName] = String(v); }
+      if (Array.isArray(x.args)) { const i = x.args.indexOf("--port"); if (i >= 0 && /^[0-9]+$/.test(String(x.args[i + 1]))) x.args[i + 1] = String(v); } };
+    svc("node-red", "", P.nodered); svc("browser", "BROWSER_SERVICE_PORT", P.browser);
+    svc("memory", "MEM_PORT", P.memory); svc("codememory", "CODE_PORT", P.codemem);
+    fs.writeFileSync(p, JSON.stringify(d, null, 2) + "\n");' "$cfg" agent=$P_AGENT llm=$P_LLM mcp=$P_MCP bind=$P_BIND \
+      extmcp=$P_EXTMCP qwen=$P_QWEN mstate=$P_MSTATE pilot=$P_PILOT leaf=$P_LEAF fleet=$P_FLEET workspace=$P_WS \
+      nodered=$P_NODERED browser=$P_BROWSER memory=$P_MEMORY codemem=$P_CODEMEM \
+    || die "could not write this instance's ports into $cfg"
+  # the workspace finds ITS agent on this instance's port (config.js, read at load — no rebuild)
+  local cj="$HOME/.heia/runtime/workspace/config.js"
+  if [ -f "$cj" ]; then
+    "$nodex" -e '
+      const fs = require("fs"), [p, port] = process.argv.slice(1); let t = fs.readFileSync(p, "utf8"), o = t;
+      if (/localAgentPort\s*:/.test(t)) t = t.replace(/localAgentPort\s*:\s*[^,}\n]*/, "localAgentPort: " + port);
+      else t = t.replace(/(__HEIA_CONFIG\s*=\s*\{)/, "$1\n  localAgentPort: " + port + ",");
+      if (t !== o) fs.writeFileSync(p, t);' "$cj" "$P_AGENT" || warn "could not set localAgentPort in $cj"
+  fi
+}
+# THE EDITORS — agent-x must reach agent-x's OWN memory, browser and code-memory, never another instance's.
+# Sealed from this instance's ports, then CHECKED against what the agent itself reports at start.
+seal_editors() {
+  [ "$INST" = 0 ] && return 0
+  local kp
+  for kp in memory=$P_MEMORY browser=$P_BROWSER codememory=$P_CODEMEM; do
+    ( cd "$AGENT" && "./$ABIN" add-editor --name "${kp%%=*}" --url "http://127.0.0.1:${kp#*=}" < /dev/null >> "$LOGD/heia-editors.log" 2>&1 ) \
+      || die "could not seal the ${kp%%=*} editor for this instance — see $LOGD/heia-editors.log"
+  done
+  ok "editors sealed to this instance's own services: memory :$P_MEMORY, browser :$P_BROWSER, code-memory :$P_CODEMEM"
+}
+verify_editors() {   # verify_editors <the agent's log text>
+  local line bad="" kv k p want
+  line="$(printf '%s\n' "$1" | grep -a 'editor proxy (sealed):' | tail -1)"
+  [ -n "$line" ] || { [ "$INST" = 0 ] || warn "the agent did not report its editors — check with: heia logs agent"; return 0; }
+  for kv in $(printf '%s' "${line#*(sealed): }" | tr ',' ' '); do
+    k="${kv%%->*}"; p="${kv##*:}"; p="${p%%/*}"
+    case "$k" in memory) want=$P_MEMORY;; browser) want=$P_BROWSER;; codememory) want=$P_CODEMEM;; nodered|node-red) want=$P_NODERED;; *) continue;; esac
+    [ "$p" = "$want" ] || bad="$bad $k->:$p(this instance's is :$want)"
+  done
+  [ -z "$bad" ] || die "THIS AGENT'S EDITORS POINT AT ANOTHER INSTANCE'S SERVICES:$bad
+  It would show another agent's memory. The install is NOT finished — run this installer again."
+  ok "editors checked: this agent reaches only its own memory, browser and code-memory"
+}
 
 # hardlink the licence into a component folder (ln, never cp) and prove it by inode
 link_one() {   # link_one <licence file name> <folder>
@@ -258,7 +414,7 @@ external_door() {
   local NODE="$HOME/.heia/runtime/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node || true)"
   local WRAP_URL="https://raw.githubusercontent.com/HexaEightTeam/hbia-agent/main/frontdoor/mission-runner.sh"
   local WRAP_SHA="82F13AB31D6009948ED6B95A93B5807EC53131B130675B4EAE4D7BE90788BC29"
-  local LOG=/tmp/heia-add-external.log
+  local LOG=${LOGD}/heia-add-external.log
   local SRC="$ADD_EXTERNAL" FW MISSION ZIP MODEL ROUTE ROUTER_ID LNAME GLOB RT NEED MISSING="" PEERS="" m f a p
   door_sha() {
     if [ "$OS" = "Darwin" ]; then shasum -a 256 "$1" 2>/dev/null | awk '{print toupper($1)}'
@@ -281,7 +437,7 @@ external_door() {
     ROUTER_ID="$(state_get router)"; ROUTE="$(state_get route)"
   else
     GLOB="$(awk '/^[[:space:]]*- match:/{gsub(/.*match: *"|".*/,"");m=$0} /^[[:space:]]*shape: *"anthropic"/{print m; exit}' "$ROUTER/upstreams.yaml" 2>/dev/null)"
-    ROUTE="${GLOB//\*/heia}"; ROUTER_ID="$LNAME|http://127.0.0.1:5100"
+    ROUTE="${GLOB//\*/heia}"; ROUTER_ID="$LNAME|http://127.0.0.1:${P_ROUTER}"
     # Opaque callers need router r9 or later; an older one refuses every one of them. Judged by the FILE
     # (its hash against the published releases), not by what this installer last recorded.
     RT="$(state_get router)"
@@ -400,7 +556,7 @@ external_door() {
   spin "Restarting the agent"
   if command -v heia > /dev/null 2>&1; then heia restart agent >> "$LOG" 2>&1
   else ( cd "$AGENT" && activate_bg restart agent >> "$LOG" 2>&1 ); fi
-  wait_port 8770 180 || die "the agent did not come back — see $LOG"
+  wait_port ${P_AGENT} 180 || die "the agent did not come back — see $LOG"
   ok "agent restarted"
 
   cat <<EOF
@@ -575,11 +731,21 @@ fi
 if [ "$OS" = "Darwin" ]; then ok "prerequisites: none needed on macOS (sandbox-exec is built in)"
 else ok "prerequisites present (bubblewrap, libicu); the sandbox starts"; fi
 
-if ! command -v dotnet >/dev/null || ! dotnet --list-runtimes 2>/dev/null | grep -q "Microsoft.NETCore.App 8\."; then
-  spin "Installing .NET 8 into ~/.dotnet"
-  curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh || die "could not download the .NET installer"
-  bash /tmp/dotnet-install.sh --channel 8.0 --install-dir "$HOME/.dotnet" > /tmp/dotnet-install.log 2>&1 || die ".NET install failed — see /tmp/dotnet-install.log"
+# THE .NET RUNTIME HEXAEIGHT IS BLESSED ON — pinned, never "the latest 8.0". On a newer patch (8.0.32) the
+# licence check fails: "Integrity failure: HexaEight.AskClientLibrary - received hash matched none of ...".
+# SDK 8.0.425 carries runtime 8.0.31.
+DOTNET_PIN_SDK=8.0.425; DOTNET_PIN_RT=8.0.31
+if ! command -v dotnet >/dev/null || ! dotnet --list-runtimes 2>/dev/null | grep -q "Microsoft.NETCore.App $DOTNET_PIN_RT "; then
+  spin "Installing .NET $DOTNET_PIN_RT into ~/.dotnet"
+  curl -fsSL https://dot.net/v1/dotnet-install.sh -o ${LOGD}/dotnet-install.sh || die "could not download the .NET installer"
+  bash ${LOGD}/dotnet-install.sh --version "$DOTNET_PIN_SDK" --install-dir "$HOME/.dotnet" > ${LOGD}/dotnet-install.log 2>&1 || die ".NET install failed — see ${LOGD}/dotnet-install.log"
 fi
+# A NEWER 8.0 PATCH BESIDE IT STILL WINS (a dotnet tool always runs on the highest patch installed) — stop and
+# name it; nothing is removed here.
+NEWER_RT="$(dotnet --list-runtimes 2>/dev/null | awk -v pin="$DOTNET_PIN_RT" '$1=="Microsoft.NETCore.App" && $2 ~ /^8\.0\./ && $2 != pin {print $2}' | tr '\n' ' ')"
+[ -z "$NEWER_RT" ] || die ".NET runtime ${NEWER_RT}is installed next to $DOTNET_PIN_RT — the HexaEight licence check fails on it.
+  Remove these folders, then run this installer again:
+    $(dotnet --list-runtimes 2>/dev/null | awk -v pin="$DOTNET_PIN_RT" '$2 ~ /^8\.0\./ && $2 != pin {gsub(/[][]/,"",$3); print $3"/"$2}' | tr '\n' ' ')"
 ok ".NET $(dotnet --version 2>/dev/null)"
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
 
@@ -723,6 +889,11 @@ cat > "$HOME/.heia/bin/heia" <<'HEIA_EOF'
 #   heia stop    [agent|router|workspace|all]
 #   heia status
 #   heia logs    [agent|router|workspace]       (follows; Ctrl-C to leave)
+#   heia router-serve add <agent> <owner email>  (this machine's router also serves that agent — kept on re-runs)
+#   heia router-serve list
+#
+# THIS INSTANCE ONLY. Its ports come from ~/.heia/instance.ports (written by the installer); another install on
+# this machine (another user) has its own and is never looked at, stopped or restarted from here.
 #
 # ONE OWNER PER SERVICE. After install, the service manager runs router, agent and workspace —
 # systemd --user on Linux/WSL, launchd on macOS — and brings them back when they stop. Everything here
@@ -739,6 +910,17 @@ ROUTER="$(sed -n 's/^router_dir=//p' "$STATE" 2>/dev/null | tail -1)"; ROUTER="$
 AGENT="$(sed -n 's/^agent_dir=//p' "$STATE" 2>/dev/null | tail -1)"; AGENT="${AGENT:-$HOME/heia-agent}"
 WS="$HOME/.heia/runtime/workspace"; NODE="$HOME/.heia/runtime/node/bin/node"
 OS="$(uname -s)"
+PF="$HOME/.heia/instance.ports"
+pget() { sed -n "s/^$1=//p" "$PF" 2>/dev/null | tail -1; }
+INST="$(pget instance)"; INST="${INST:-0}"
+P_ROUTER="$(pget router)"; P_ROUTER="${P_ROUTER:-5100}"
+P_AGENT="$(pget agent)";   P_AGENT="${P_AGENT:-8770}"
+P_WS="$(pget workspace)";  P_WS="${P_WS:-5620}"
+ROUTER_SHARED="$(pget router_shared)"            # yes: the router is another instance's — not ours to run
+LOGS="$HOME/.heia/logs"; mkdir -p "$LOGS"
+CLAIM="/var/tmp/hexaeight-instances/$INST"
+claim_touch() { [ -f "$CLAIM" ] && [ "$(sed -n 's/^user=//p' "$CLAIM" | tail -1)" = "$(id -un)" ] && touch "$CLAIM" 2>/dev/null; true; }
+if [ "$OS" = "Darwin" ]; then RBIN=hexaeight-router-osx-arm64; else RBIN=hexaeight-router-linux-x64; fi
 if [ -t 1 ]; then B=$'\e[1m'; G=$'\e[32m'; R=$'\e[31m'; Y=$'\e[33m'; N=$'\e[0m'; else B= G= R= Y= N=; fi
 
 listening() {
@@ -749,7 +931,7 @@ port_pid() {
   if [ "$OS" = "Darwin" ]; then lsof -tiTCP:"$1" -sTCP:LISTEN 2>/dev/null | head -1
   else ss -ltnp 2>/dev/null | grep ":$1 " | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2; fi
 }
-port_of() { case "$1" in router) echo 5100;; agent) echo 8770;; workspace) echo 5620;; esac; }
+port_of() { case "$1" in router) echo "$P_ROUTER";; agent) echo "$P_AGENT";; workspace) echo "$P_WS";; esac; }
 
 # Who owns the services here?
 MANAGER=none
@@ -767,7 +949,7 @@ installed() {
     systemd) [ -f "$UL/hexaeight-$1.service" ] ;;
     launchd) [ -f "$UM/com.hexaeight.$1.plist" ] ;;
     *) ROLE="$(sed -n 's/^role=//p' "$STATE" 2>/dev/null | tail -1)"   # an API agent: the agent alone, whatever folders are about
-       case "$1" in router) [ "$ROLE" != api ] && [ -d "$ROUTER" ] ;; agent) [ -d "$AGENT" ] ;; workspace) [ "$ROLE" != api ] && [ -f "$WS/serve.mjs" ] ;; esac ;;
+       case "$1" in router) [ "$ROLE" != api ] && [ "$ROUTER_SHARED" != yes ] && [ -d "$ROUTER" ] ;; agent) [ -d "$AGENT" ] ;; workspace) [ "$ROLE" != api ] && [ -f "$WS/serve.mjs" ] && [ "$(sed -n 's/^workspace_own=//p' "$STATE" 2>/dev/null | tail -1)" != no ] ;; esac ;;
   esac
 }
 
@@ -785,11 +967,13 @@ wait_down() { local p i=0; p="$(port_of "$1")"; while [ "$i" -lt 30 ] && listeni
 # The workspace is a small static server; with no manager it is started and stopped directly.
 ws_direct() {
   case "$1" in
-    stop)  local pid; pid="$(port_pid 5620)"; [ -n "$pid" ] && kill "$pid" 2> /dev/null; wait_down workspace ;;
+    # port_pid shows only THIS user's processes (ss without root does not show another user's), so this never
+    # reaches into another install
+    stop)  local pid; pid="$(port_pid "$P_WS")"; [ -n "$pid" ] && kill "$pid" 2> /dev/null; wait_down workspace ;;
     *)     [ "$1" = restart ] && ws_direct stop
-           listening 5620 && return 0
-           if command -v setsid > /dev/null 2>&1; then ( cd "$WS" && setsid "$NODE" serve.mjs --port 5620 --host 127.0.0.1 > "$HOME/.heia/workspace-5620.log" 2>&1 < /dev/null & )
-           else ( cd "$WS" && nohup "$NODE" serve.mjs --port 5620 --host 127.0.0.1 > "$HOME/.heia/workspace-5620.log" 2>&1 < /dev/null & ); fi ;;
+           listening "$P_WS" && return 0
+           if command -v setsid > /dev/null 2>&1; then ( cd "$WS" && setsid "$NODE" serve.mjs --port "$P_WS" --host 127.0.0.1 > "$HOME/.heia/workspace-$P_WS.log" 2>&1 < /dev/null & )
+           else ( cd "$WS" && nohup "$NODE" serve.mjs --port "$P_WS" --host 127.0.0.1 > "$HOME/.heia/workspace-$P_WS.log" 2>&1 < /dev/null & ); fi ;;
   esac
 }
 
@@ -810,8 +994,9 @@ act() {   # act start|stop|restart <service>
       if [ "$s" = workspace ]; then ws_direct "$verb"; return; fi
       local dir="$AGENT"; [ "$s" = router ] && dir="$ROUTER"
       local v="$verb"; [ "$v" = start ] && v=restart     # Activate starts by restarting
-      if command -v setsid > /dev/null 2>&1; then ( cd "$dir" && setsid -w hexaeight-activate "$v" "$s" < /dev/null > "/tmp/heia-$v-$s.log" 2>&1 )
-      else ( cd "$dir" && nohup hexaeight-activate "$v" "$s" < /dev/null > "/tmp/heia-$v-$s.log" 2>&1 ); fi ;;
+      [ "$s" = router ] && export LLM_ROUTER_PORT="$P_ROUTER"    # this instance's router port
+      if command -v setsid > /dev/null 2>&1; then ( cd "$dir" && setsid -w hexaeight-activate "$v" "$s" < /dev/null > "$LOGS/heia-$v-$s.log" 2>&1 )
+      else ( cd "$dir" && nohup hexaeight-activate "$v" "$s" < /dev/null > "$LOGS/heia-$v-$s.log" 2>&1 ); fi ;;
   esac
 }
 
@@ -837,7 +1022,7 @@ public_url() {
 # the agent on the fastagents.net relay, the relay carries it as <agent label>-ws.fastagents.net.
 workspace_url() {
   local u="" a
-  if ps -eo args 2> /dev/null | grep -v grep | grep -q -- "--url http://127.0.0.1:5620"; then
+  if ps -u "$(id -u)" -o args 2> /dev/null | grep -v grep | grep -q -- "--url http://127.0.0.1:$P_WS"; then
     u="$(grep -a -o 'https://[a-z0-9-]*\.trycloudflare\.com' "$HOME/.heia/workspace-tunnel.log" 2> /dev/null | tail -1)"
   fi
   if [ -z "$u" ]; then
@@ -859,13 +1044,14 @@ show_urls() {
     if answers "$w/"; then echo "  ${B}workspace  $w${N}  ← open this, sign in as the owner"
     else echo "  workspace  $w ${Y}— not answering (tunnel down? run the installer again for a new one)${N}"; fi
   elif installed workspace; then
-    echo "  workspace  http://localhost:5620  (no public address — run the installer to get one)"
+    echo "  workspace  http://localhost:$P_WS  (no public address — run the installer to get one)"
   fi
 }
 
 cmd="${1:-status}"; svc="${2:-}"
 case "$cmd" in
   restart|start)
+    claim_touch
     list="$(targets "${svc:-agent}")"
     [ -n "$list" ] || { echo "  nothing to $cmd here"; exit 0; }
     echo "  ${B}$cmd${N} ($MANAGER): $list"
@@ -886,7 +1072,9 @@ case "$cmd" in
       || echo "  ${Y}note:${N} $MANAGER starts it again at the next login (use 'heia start' to bring it back now)"
     for s in $(reverse $list); do act stop "$s"; wait_down "$s"; printf '  %-10s stopped\n' "$s"; done ;;
   status)
-    echo "  ${B}HexaEight on this machine${N}  (managed by: $MANAGER)"
+    claim_touch
+    echo "  ${B}HexaEight on this machine${N}  (managed by: $MANAGER$([ "$INST" != 0 ] && echo "; instance $INST"))"
+    [ "$ROUTER_SHARED" = yes ] && echo "  router     shared — another install's router on :$P_ROUTER (not run from here)"
     for s in router agent workspace; do
       installed "$s" || continue
       p="$(port_of "$s")"; st="${R}down${N}"; listening "$p" && st="${G}up${N}"
@@ -903,17 +1091,47 @@ case "$cmd" in
       *) case "$s" in
            agent)     exec tail -n 100 -f "$AGENT/agent.log" ;;
            router)    exec tail -n 100 -f "$ROUTER/router.log" ;;
-           workspace) exec tail -n 100 -f "$HOME/.heia/workspace-5620.log" ;;
+           workspace) exec tail -n 100 -f "$HOME/.heia/workspace-$P_WS.log" ;;
          esac ;;
+    esac ;;
+  router-serve)
+    # THIS MACHINE'S ROUTER ALSO SERVES ANOTHER AGENT (another instance's, usually). Recorded in
+    # ~/.heia/router-serves, which the installer reads too: its re-runs keep these rules instead of resetting
+    # the router to its base policy.
+    f="$HOME/.heia/router-serves"
+    case "${2:-list}" in
+      list) if [ -s "$f" ]; then cat "$f"; else echo "  this router serves no other agents"; fi ;;
+      add)
+        a="${3:-}"; o="${4:-}"
+        [ -n "$a" ] && [ -n "$o" ] || { echo "usage: heia router-serve add <agent identity> <owner email>" >&2; exit 2; }
+        [ "$ROUTER_SHARED" != yes ] && [ -f "$ROUTER/$RBIN" ] && [ -f "$ROUTER/env-file" ] || { echo "  no router of this install here — run this as the user whose router it is" >&2; exit 1; }
+        ol="$(printf '%s' "$o" | tr '[:upper:]' '[:lower:]')"
+        if [ "$OS" = "Darwin" ]; then oh="$(printf '%s' "$ol" | shasum -a 512 | cut -d' ' -f1)"; else oh="$(printf '%s' "$ol" | sha512sum | cut -d' ' -f1)"; fi
+        grep -q "^$a " "$f" 2> /dev/null || echo "$a $o" >> "$f"
+        for ans in "$(printf 'N\n%s\n*\n\ny\n' "$a")" "$(printf 'N\n%s,%s\n*\n%s\ny\n' "$ol" "$oh" "$a")"; do
+          for try in 1 2 3 4; do      # the router's licence check can fail once right after a restart
+            ( cd "$ROUTER" && set -a && . ./env-file && set +a && printf '%s\n' "$ans" | "./$RBIN" --init-policy ) > "$LOGS/heia-router-serve.try" 2>&1; rc=$?
+            cat "$LOGS/heia-router-serve.try" >> "$LOGS/heia-router-serve.log"
+            grep -q 'License verification: Failed' "$LOGS/heia-router-serve.try" || break
+            sleep 15
+          done
+          [ "$rc" = 0 ] || { echo "  could not add the rule — see $LOGS/heia-router-serve.log" >&2; exit 1; }
+        done
+        echo "  $a (and $o, through it) may now use this router; restarting the router so it enforces that"
+        exec "$0" restart router ;;
+      *) echo "usage: heia router-serve add <agent identity> <owner email> · heia router-serve list" >&2; exit 2 ;;
     esac ;;
   -h|--help|help)
     sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//' ;;
   *)
-    echo "usage: heia restart|start|stop [agent|router|workspace|all] · heia status · heia logs [agent|router|workspace]" >&2
+    echo "usage: heia restart|start|stop [agent|router|workspace|all] · heia status · heia logs [agent|router|workspace] · heia router-serve add|list" >&2
     exit 2 ;;
 esac
 HEIA_EOF
 chmod +x "$HOME/.heia/bin/heia"
+mkdir -p "$HOME/.heia/logs"
+write_ports "$HOME/.heia" "$AGENT"; [ "$(state_get router_mode)" = own ] && write_ports "$ROUTER"
+claim_write
 for prof in $PROFILES; do
   if ! grep -q "# >>> hexaeight-bin >>>" "$prof" 2>/dev/null; then
     printf '\n# >>> hexaeight-bin >>>  (the heia command)\nexport PATH="$HOME/.heia/bin:$PATH"\n# <<< hexaeight-bin <<<\n' >> "$prof"
@@ -950,25 +1168,25 @@ if [ "$API" = 1 ]; then
   ENG="$HOME/.heia/runtime/harness/hexaeight-engine"
 
   step "3 · Router — none (an API agent makes no model calls)"
-  listening 5100 && note "a router is running here (:5100) — left as it is; this agent does not use it"
+  listening ${P_ROUTER} && note "a router is running here (:${P_ROUTER}) — left as it is; this agent does not use it"
 
   step "4 · API agent"
   link_licence "$AGENT"
   # ONE STOP, up front: the binary, the engine and the config all change under a stopped agent, and it is
   # started once, by its owner, at the end. (managed_stop above already stopped a systemd / launchd copy.)
-  if listening 8770; then
+  if listening ${P_AGENT}; then
     spin "Stopping the agent (it is started again at the end)"
-    ( cd "$AGENT" && activate stop agent > /tmp/heia-agent-stop.log 2>&1 )
-    for i in $(seq 1 30); do listening 8770 || break; sleep 1; done
-    listening 8770 && die "the agent did not stop (:8770 still answers) — see /tmp/heia-agent-stop.log"
+    ( cd "$AGENT" && activate stop agent > ${LOGD}/heia-agent-stop.log 2>&1 )
+    for i in $(seq 1 30); do listening ${P_AGENT} || break; sleep 1; done
+    listening ${P_AGENT} && die "the agent did not stop (:${P_AGENT} still answers) — see ${LOGD}/heia-agent-stop.log"
     ok "agent stopped"
   fi
   FRESH=0
   if [ ! -f "$AGENT/$ABIN" ]; then
     FRESH=1
     spin "Downloading the agent (binary only — an API agent needs nothing else)"
-    activate install-agent --dir "$AGENT" --binary-only > /tmp/heia-install-agent.log 2>&1 \
-      || die "install-agent failed — see /tmp/heia-install-agent.log"
+    activate install-agent --dir "$AGENT" --binary-only > ${LOGD}/heia-install-agent.log 2>&1 \
+      || die "install-agent failed — see ${LOGD}/heia-install-agent.log"
     state_set agent "$(rel_top agent tag)"
     ok "agent installed and verified against its published hash"
   elif is_current agent "$AGENT/$ABIN" agent; then
@@ -977,12 +1195,12 @@ if [ "$API" = 1 ]; then
     T="$(rel_top agent tag)"
     spin "Updating the agent to $T"
     AF=""; [ "$OS" = "Darwin" ] && AF="--force"; [ "${FORCE_AGENT:-0}" = 1 ] && AF="--force"
-    if activate install-agent --dir "$AGENT" --binary-only $AF > /tmp/heia-install-agent.log 2>&1; then
+    if activate install-agent --dir "$AGENT" --binary-only $AF > ${LOGD}/heia-install-agent.log 2>&1; then
       state_set agent "$T"; updated "agent → $T"; ok "agent updated to $T (the previous binary is kept beside it)"
-    elif grep -q 'A DIFFERENT FILE' /tmp/heia-install-agent.log; then
+    elif grep -q 'A DIFFERENT FILE' ${LOGD}/heia-install-agent.log; then
       warn "the agent here is not a published release (a local build) — left as it is. FORCE_AGENT=1 replaces it with $T."
     else
-      warn "the agent was not updated — see /tmp/heia-install-agent.log; the installed one stays"
+      warn "the agent was not updated — see ${LOGD}/heia-install-agent.log; the installed one stays"
     fi
   fi
   [ "$OS" = "Darwin" ] && mac_sign "$AGENT/$ABIN"
@@ -1090,7 +1308,7 @@ if cf:
             s["port"] = int(a[a.index(f) + 1]); break'
 
   if [ "$FRESH" = 1 ] || [ "$TRIM" = 1 ]; then
-    [ -f "$CFG" ] || die "no $CFG to write — install-agent should have created it (see /tmp/heia-install-agent.log)"
+    [ -f "$CFG" ] || die "no $CFG to write — install-agent should have created it (see ${LOGD}/heia-install-agent.log)"
     cp -p "$CFG" "$CFG.bak_$(date +%Y%m%d_%H%M%S)_pre_api"
     api_edit "$CFG" "$APIJS $PORTJS" "$APIPY
 $PORTPY" || die "could not write $CFG (no node, python3 or osascript here)"
@@ -1116,25 +1334,26 @@ $PORTPY" || die "could not write $CFG (no node, python3 or osascript here)"
     for p in "$HOME/.heia/runtime/workspace/browser-service/service.mjs" "$HOME/.heia/runtime/workspace/memory-service/service.mjs" \
              "$HOME/.heia/runtime/workspace/code-memory-service/service.mjs" "$HOME/.heia/leafrt/host.mjs" \
              "$HOME/.heia/nodered/heia-nodered-host.js"; do
-      for pid in $(pgrep -f -- "$p" 2>/dev/null); do
+      for pid in $(pgrep -u "$(id -u)" -f -- "$p" 2>/dev/null); do
         kill "$pid" 2>/dev/null && note "stopped ${p#$HOME/.heia/} (pid $pid) — an API agent does not use it"
       done
     done
-    WPID="$(api_port_pid 5620)"
+    WPID="$(api_port_pid ${P_WS})"
     if [ -n "$WPID" ] && [ "$(api_cwd "$WPID")" = "$HOME/.heia/runtime/workspace" ]; then
-      kill "$WPID" 2>/dev/null && note "stopped the workspace on :5620 (pid $WPID) — an API agent has none"
+      kill "$WPID" 2>/dev/null && note "stopped the workspace on :${P_WS} (pid $WPID) — an API agent has none"
     fi
   fi
 
   # WHO MAY CALL IT — the same inbound rule an external door uses, one per --allow.
   for a in $ALLOW; do
-    if ( cd "$AGENT" && activate add-policy --principal "$a" ) >> /tmp/heia-api-policy.log 2>&1; then ok "$a may call this agent"
-    else warn "could not admit $a — see /tmp/heia-api-policy.log"; fi
+    if ( cd "$AGENT" && activate add-policy --principal "$a" ) >> ${LOGD}/heia-api-policy.log 2>&1; then ok "$a may call this agent"
+    else warn "could not admit $a — see ${LOGD}/heia-api-policy.log"; fi
   done
 
   step "5 · Workspace — none (an API agent is called by other agents, not used in a browser)"
   write_heia
 
+  apply_ports "$CFG"
   # START AT LOGIN — the agent alone. On Linux a USER unit stops when that user's last login ends unless
   # the user lingers; on a server nobody stays logged in, so linger is required (else: our own copy).
   step "7 · Start at login"
@@ -1158,9 +1377,9 @@ $PORTPY" || die "could not write $CFG (no node, python3 or osascript here)"
                     "[Service]" "Environment=HEIA_ASK_TIMEOUT_SECONDS=$HEIA_ASK_TIMEOUT_SECONDS" \
         > "$UNITS_L/hexaeight-agent.service.d/ask-timeout.conf"
     fi
-    ( cd "$AGENT" && activate autostart on --agent "$AGENT" --no-router --no-workspace > /tmp/heia-autostart.log 2>&1 )
-    if wait_port 8770 150; then ok "$MANAGER runs the agent now — it starts at login and comes back if it stops"
-    else warn "$MANAGER did not bring the agent up (see /tmp/heia-autostart.log) — starting it directly"; MANAGER=""; agent_start "Starting the agent" || die "the agent did not start — see $AGENT/agent.log"; fi
+    ( cd "$AGENT" && activate autostart on --agent "$AGENT" --no-router --no-workspace > ${LOGD}/heia-autostart.log 2>&1 )
+    if wait_port ${P_AGENT} 150; then ok "$MANAGER runs the agent now — it starts at login and comes back if it stops"
+    else warn "$MANAGER did not bring the agent up (see ${LOGD}/heia-autostart.log) — starting it directly"; MANAGER=""; agent_start "Starting the agent" || die "the agent did not start — see $AGENT/agent.log"; fi
   else
     agent_start "Starting the agent" || die "the agent did not start — see $AGENT/agent.log"
   fi
@@ -1200,6 +1419,33 @@ fi
 # ══ 3 · the router ═════════════════════════════════════════════════════════════════════════════════
 step "3 · Model router"
 MODE="$(state_get router_mode)"
+# ONE ROUTER CAN SERVE SEVERAL AGENTS. Another instance's router on this machine is offered first: from that
+# install's claim, or — an install made before claims existed — the router answering on the default port.
+if [ -z "$MODE" ] && [ "$INST" != 0 ]; then
+  OR_ID=""; OR_PORT=""; OR_USER=""; OR_ROUTE=""; OR_MODEL=""
+  for n in 0 1 2 3 4 5 6 7 8 9; do
+    [ "$n" = "$INST" ] && continue
+    claimed_by_other "$n" || continue
+    [ "$(claim_get "$n" router_shared)" = yes ] && continue
+    OR_PORT="$(claim_get "$n" router_port)"; [ -n "$OR_PORT" ] && listening "$OR_PORT" || { OR_PORT=""; continue; }
+    OR_ID="$(claim_get "$n" router_identity)"; OR_USER="$(claim_get "$n" user)"
+    OR_ROUTE="$(claim_get "$n" route)"; OR_MODEL="$(claim_get "$n" model)"; break
+  done
+  if [ -z "$OR_PORT" ] && listening 5100; then OR_PORT=5100; OR_USER="another user"; fi
+  if [ -n "$OR_PORT" ]; then
+    note "This machine already has a router on :$OR_PORT (${OR_ID:-identity not recorded} — $OR_USER's install)."
+    ask "Use it for this agent too, instead of a router of its own? (Y/n)" "Y"
+    case "$REPLY" in n|N|no|NO) ;; *)
+      [ -n "$OR_ID" ] || { ask "That router's identity (its licence name, e.g. web0-quiet-amber-fern42)"; OR_ID="$REPLY"; }
+      [ -n "$OR_ID" ] || die "no router identity given"
+      [ -n "$OR_ROUTE" ] || { ask "Route name on that router (anthropic dialect, e.g. heia-ant-aws)"; OR_ROUTE="$REPLY"; }
+      [ -n "$OR_MODEL" ] || { ask "Model id on that route"; OR_MODEL="$REPLY"; }
+      MODE=remote; state_set router_mode remote; state_set router_shared yes
+      state_set router "$OR_ID|http://127.0.0.1:$OR_PORT"; state_set route "$OR_ROUTE"; state_set model "$OR_MODEL"
+      ok "this agent uses the router on :$OR_PORT ($OR_ID)" ;;
+    esac
+  fi
+fi
 if [ -z "$MODE" ]; then
   note "Agents never hold model keys — a router does. Choose one:"
   note "  1. Run a router here with my own provider key (AWS Bedrock, z.ai, Azure AI Foundry, Azure OpenAI, OpenAI, OpenRouter, or any compatible URL)"
@@ -1209,11 +1455,12 @@ if [ -z "$MODE" ]; then
 fi
 
 if [ "$MODE" = own ]; then
+  export LLM_ROUTER_PORT="$P_ROUTER"     # this instance's router port: every router this script starts inherits it
   link_licence "$ROUTER"
   if [ ! -f "$ROUTER/$RBIN" ]; then
     spin "Downloading the router"
-    activate install-router --dir "$ROUTER" > /tmp/heia-install-router.log 2>&1 \
-      || die "install-router failed — see /tmp/heia-install-router.log"
+    activate install-router --dir "$ROUTER" > ${LOGD}/heia-install-router.log 2>&1 \
+      || die "install-router failed — see ${LOGD}/heia-install-router.log"
     [ "$OS" = "Darwin" ] && mac_sign "$ROUTER/$RBIN"
     state_set router "$(rel_top router tag)"
     ok "router installed in $ROUTER"
@@ -1222,11 +1469,11 @@ if [ "$MODE" = own ]; then
   else
     T="$(rel_top router tag)"; spin "Updating the router to $T"
     RF=""; [ "$OS" = "Darwin" ] && RF="--force"      # a signed copy of an older release, recorded as ours
-    if activate install-router --dir "$ROUTER" $RF > /tmp/heia-install-router.log 2>&1; then
+    if activate install-router --dir "$ROUTER" $RF > ${LOGD}/heia-install-router.log 2>&1; then
       [ "$OS" = "Darwin" ] && mac_sign "$ROUTER/$RBIN"
       state_set router "$T"; updated "router → $T"; ok "router updated to $T (the previous one is kept beside it)"
     else
-      warn "the router was not updated — see /tmp/heia-install-router.log; the installed one keeps running"
+      warn "the router was not updated — see ${LOGD}/heia-install-router.log; the installed one keeps running"
     fi
   fi
 
@@ -1252,7 +1499,7 @@ if [ "$MODE" = own ]; then
     local a
     if [ -n "$2" ]; then a="$(printf '%s\n\n%s\n%s\n%s\n' "$1" "$2" "$3" "$KEY")"
     else                 a="$(printf '%s\n\n%s\n%s\n' "$1" "$3" "$KEY")"; fi
-    ( cd "$ROUTER" && printf '%s\n' "$a" | hexaeight-activate upstreams >> /tmp/heia-upstreams.log 2>&1 )
+    ( cd "$ROUTER" && printf '%s\n' "$a" | hexaeight-activate upstreams >> ${LOGD}/heia-upstreams.log 2>&1 )
     a=""
   }
   write_entry() {   # write_entry <match> <shape> <translate or ""> <url> <bearer|api-key> — KEY must be set
@@ -1265,7 +1512,7 @@ if [ "$MODE" = own ]; then
       if [ "$5" = api-key ]; then printf '    auth:      "none"\n    secret:    ""\n    headers:\n      api-key: "%s"\n' "$KEY"
       else                        printf '    auth:      "bearer"\n    secret:    "%s"\n' "$KEY"; fi
       true ) >> "$ROUTER/upstreams.yaml"
-    printf '  + %s  →  %s\n' "$m" "$4" >> /tmp/heia-upstreams.log
+    printf '  + %s  →  %s\n' "$m" "$4" >> ${LOGD}/heia-upstreams.log
   }
   # Per provider: its name, its route tag, where its OpenAI-format endpoint is, and how the key is sent.
   # Azure (Foundry and Azure OpenAI) use the v1 path: the model/deployment goes in the body, no api-version.
@@ -1309,7 +1556,7 @@ if [ "$MODE" = own ]; then
     else
       ( umask 077; printf 'upstreams:\n\n' > "$ROUTER/upstreams.yaml" )
     fi
-    : > /tmp/heia-upstreams.log
+    : > ${LOGD}/heia-upstreams.log
     note "Where are your models? The engines speak the Anthropic format; for 5 to 8 the router converts."
     note "  1. AWS Bedrock        — one AWS key reaches Claude, GLM, Kimi, DeepSeek, Qwen and more"
     note "  2. z.ai               — GLM models"
@@ -1334,7 +1581,7 @@ if [ "$MODE" = own ]; then
                # no model list to pick from here — the deployment / model id given above is the model
                [ -n "$(state_get model)" ] || state_set model "$DEP" ;;
     esac
-    has_shape anthropic || die "the provider was not added — see /tmp/heia-upstreams.log"
+    has_shape anthropic || die "the provider was not added — see ${LOGD}/heia-upstreams.log"
     PREV_P="$P"; PREV_REG="$REG"; PREV_RES="$RES"; PREV_URL="$URL"; PREV_KEY="$KEY"; KEY=""
 
     # THE ADD-ONS: OpenAI-format routes for engines you bring. As many as wanted, any provider.
@@ -1364,7 +1611,7 @@ if [ "$MODE" = own ]; then
       ask "Add another? (y/N)" "N"
     done
     PREV_KEY=""
-    grep -o '+ \*-[a-z]*-[^ ]*  →  .*' /tmp/heia-upstreams.log | sed 's/^/  /'
+    grep -o '+ \*-[a-z]*-[^ ]*  →  .*' ${LOGD}/heia-upstreams.log | sed 's/^/  /'
   fi
   ok "provider configured (Anthropic format — what the engines speak$(has_shape openai && echo '; OpenAI format too'))"
   # OPAQUE CALLERS PERMITTED — the router's default, and how the reference install runs: an agent may
@@ -1381,7 +1628,7 @@ if [ "$MODE" = own ]; then
   # The route engines use: the first anthropic glob, made concrete ("*-ant-aws" -> "heia-ant-aws").
   GLOB="$(awk '/^[[:space:]]*- match:/{gsub(/.*match: *"|".*/,"");m=$0} /^[[:space:]]*shape: *"anthropic"/{print m; exit}' "$ROUTER/upstreams.yaml")"
   ROUTE="${GLOB//\*/heia}"
-  ROUTER_ID="$NAME|http://127.0.0.1:5100"
+  ROUTER_ID="$NAME|http://127.0.0.1:${P_ROUTER}"
 
   # THE ROUTER'S POLICY — the base set, exactly these six rules (what the reference install runs):
   #   agent        -> *       inbound    the agent itself may open sessions
@@ -1408,26 +1655,38 @@ if [ "$MODE" = own ]; then
     MGLOB='*,*/*'
     WANT="$(printf '%s\n' "$WANT" "$NAME|*/*|outbound" "$OWNER_LC|*/*|outbound" "$OWNER_HASH|*/*|outbound")"
   fi
-  WANT="$(printf '%s\n' "$WANT" | sort)"
+  # OTHER AGENTS THIS ROUTER SERVES (heia router-serve add): their rules are part of what is wanted, so a re-run
+  # never cuts them off. One line each: <agent identity> <owner email>.
+  SERVES="$HOME/.heia/router-serves"; SERVE_ANS=()
+  if [ -f "$SERVES" ]; then
+    while read -r SA SO; do
+      case "$SA" in ""|\#*) continue ;; esac
+      SOL="$(printf '%s' "$SO" | tr '[:upper:]' '[:lower:]')"
+      if [ "$OS" = "Darwin" ]; then SOH="$(printf '%s' "$SOL" | shasum -a 512 | cut -d' ' -f1)"; else SOH="$(printf '%s' "$SOL" | sha512sum | cut -d' ' -f1)"; fi
+      WANT="$(printf '%s\n' "$WANT" "$SA|*|inbound" "$SA|*|outbound" "$SOL|$SA|inbound" "$SOL|*|outbound" "$SOH|$SA|inbound" "$SOH|*|outbound")"
+      SERVE_ANS+=("$(printf 'N\n%s\n%s\n\ny\n' "$SA" "$MGLOB")" "$(printf 'N\n%s,%s\n%s\n%s\ny\n' "$SOL" "$SOH" "$MGLOB" "$SA")")
+    done < "$SERVES"
+  fi
+  WANT="$(printf '%s\n' "$WANT" | sort -u)"
   NRULES="$(printf '%s\n' "$WANT" | wc -l | tr -d ' ')"
   router_rules() {   # what the router ENFORCES — the list it prints at startup
     grep -a -o "\[policy\]   sender='[^']*' dest='[^']*' realm='[^']*' dir='[a-z]*'" "$ROUTER/router.log" 2>/dev/null \
-      | sed "s/.*sender='\([^']*\)' dest='\([^']*\)' realm='[^']*' dir='\([a-z]*\)'/\1|\2|\3/" | sort
+      | sed "s/.*sender='\([^']*\)' dest='\([^']*\)' realm='[^']*' dir='\([a-z]*\)'/\1|\2|\3/" | sort -u
   }
   # START ORDER: router first, then the agent (the documented order — an agent started before its
   # router reports errors that have nothing to do with their cause). So the agent is stopped before
   # the router is touched and started again in step 4, once the router is up.
-  if [ -f "$AGENT/$ABIN" ] && listening 8770; then
-    ( cd "$AGENT" && activate stop agent > /tmp/heia-agent-stop.log 2>&1 )
-    for i in $(seq 1 20); do listening 8770 || break; sleep 1; done
+  if [ -f "$AGENT/$ABIN" ] && listening ${P_AGENT}; then
+    ( cd "$AGENT" && activate stop agent > ${LOGD}/heia-agent-stop.log 2>&1 )
+    for i in $(seq 1 20); do listening ${P_AGENT} || break; sleep 1; done
     note "agent stopped — the router starts first"
   fi
   router_restart() {
     spin "Starting the router"
-    ( cd "$ROUTER" && activate stop router > /tmp/heia-router-stop.log 2>&1 )
-    for i in $(seq 1 20); do listening 5100 || break; sleep 1; done
-    ( cd "$ROUTER" && activate_bg restart router > /tmp/heia-router-start.log 2>&1 )
-    wait_port 5100 60 || die "the router did not start — see $ROUTER/router.log"
+    ( cd "$ROUTER" && activate stop router > ${LOGD}/heia-router-stop.log 2>&1 )
+    for i in $(seq 1 20); do listening ${P_ROUTER} || break; sleep 1; done
+    ( cd "$ROUTER" && activate_bg restart router > ${LOGD}/heia-router-start.log 2>&1 )
+    wait_port ${P_ROUTER} 60 || die "the router did not start — see $ROUTER/router.log"
     for i in $(seq 1 30); do grep -a -q "Now listening on" "$ROUTER/router.log" 2>/dev/null && break; sleep 1; done
     sleep 3
   }
@@ -1453,32 +1712,32 @@ if [ "$MODE" = own ]; then
     # Answers: no external authorizer · who · models (* = every model this router serves) · vouch · write.
     #   1. the agent: vouch blank (= '*'). This first run also removes the fresh router's open wildcards.
     #   2. the owner — address AND subject hash — vouched for by this agent only (additive).
-    : > /tmp/heia-router-policy.log
+    : > ${LOGD}/heia-router-policy.log
     # THE LICENCE CHECK can fail transiently right after the router restarts ("License verification:
     # Failed" — seen on the Mac and on WSL, each time fine on a retry). That attempt writes nothing,
     # so it is simply run again, up to 4 times, 15 s apart.
-    for ANSWERS in "$(printf 'N\n%s\n%s\n\ny\n' "$NAME" "$MGLOB")" "$(printf 'N\n%s,%s\n%s\n%s\ny\n' "$OWNER_LC" "$OWNER_HASH" "$MGLOB" "$NAME")"; do
+    for ANSWERS in "$(printf 'N\n%s\n%s\n\ny\n' "$NAME" "$MGLOB")" "$(printf 'N\n%s,%s\n%s\n%s\ny\n' "$OWNER_LC" "$OWNER_HASH" "$MGLOB" "$NAME")" "${SERVE_ANS[@]}"; do
       for TRY in 1 2 3 4; do
         ( cd "$ROUTER" && set -a && . ./env-file && set +a \
-          && printf '%s\n' "$ANSWERS" | "./$RBIN" --init-policy > /tmp/heia-router-policy.try 2>&1 ); RC=$?
-        cat /tmp/heia-router-policy.try >> /tmp/heia-router-policy.log
-        grep -q 'License verification: Failed' /tmp/heia-router-policy.try || break
-        [ "$TRY" = 4 ] && die "the router's licence check kept failing — see /tmp/heia-router-policy.log"
+          && printf '%s\n' "$ANSWERS" | "./$RBIN" --init-policy > ${LOGD}/heia-router-policy.try 2>&1 ); RC=$?
+        cat ${LOGD}/heia-router-policy.try >> ${LOGD}/heia-router-policy.log
+        grep -q 'License verification: Failed' ${LOGD}/heia-router-policy.try || break
+        [ "$TRY" = 4 ] && die "the router's licence check kept failing — see ${LOGD}/heia-router-policy.log"
         note "the router's licence check failed (it happens right after a restart) — retrying in 15 s"
         spin "Waiting to retry"; sleep 15; spin "Writing the router's policy"
       done
-      [ "$RC" = 0 ] || die "could not write the router policy — see /tmp/heia-router-policy.log"
+      [ "$RC" = 0 ] || die "could not write the router policy — see ${LOGD}/heia-router-policy.log"
     done
     router_restart
   fi
   if [ "$KEEP_POLICY" = 1 ]; then
-    ok "router running on :5100 — its own policy kept ($(router_rules | grep -c .) rules)"
+    ok "router running on :${P_ROUTER} — its own policy kept ($(router_rules | grep -c .) rules)"
   else
     if [ "$(router_rules)" != "$WANT" ]; then
       note "The router enforces:"; router_rules | sed 's/^/    /'
-      die "the router's policy is not the expected $NRULES rules — see /tmp/heia-router-policy.log"
+      die "the router's policy is not the expected $NRULES rules — see ${LOGD}/heia-router-policy.log"
     fi
-    ok "router running on :5100 — enforcing $NRULES rules: $NAME, and $OWNER only through it"
+    ok "router running on :${P_ROUTER} — enforcing $NRULES rules: $NAME, and $OWNER only through it"
   fi
 
   MODEL="$(state_get model)"
@@ -1501,11 +1760,11 @@ if [ "$MODE" = own ]; then
     # video, rerank and speech models; none of them can hold a conversation, so they are left out
     # (the full list: cd ~/heia-router && hexaeight-activate models).
     spin "Asking the provider which models it has"
-    ( cd "$ROUTER" && activate models ) > /tmp/heia-models.log 2>&1
-    MODELS="$(grep -E '^ {6,}[a-z0-9][a-z0-9._:/-]*$' /tmp/heia-models.log | awk '{print $1}' \
+    ( cd "$ROUTER" && activate models ) > ${LOGD}/heia-models.log 2>&1
+    MODELS="$(grep -E '^ {6,}[a-z0-9][a-z0-9._:/-]*$' ${LOGD}/heia-models.log | awk '{print $1}' \
       | grep -Eiv 'embed|rerank|canvas|reel|sonic|titan|stability|twelvelabs|upscale|image|vision|voxtral|pixtral|safeguard|marengo|pegasus|:[0-9]+k$' \
       | sort -u)"
-    [ -n "$MODELS" ] || { spin_done; sed 's/^/    /' /tmp/heia-models.log; die "the provider listed no chat models — check the key and region"; }
+    [ -n "$MODELS" ] || { spin_done; sed 's/^/    /' ${LOGD}/heia-models.log; die "the provider listed no chat models — check the key and region"; }
     DEF="$(printf '%s\n' "$MODELS" | grep -Ex 'zai\.glm-5|glm-5' | head -1)"
     [ -n "$DEF" ] || DEF="$(printf '%s\n' "$MODELS" | grep -E 'claude-sonnet' | tail -1)"
     [ -n "$DEF" ] || DEF="$(printf '%s\n' "$MODELS" | head -1)"
@@ -1526,17 +1785,33 @@ else
   [ -n "$ROUTE" ]     || { ask "Route name on that router (anthropic dialect, e.g. claude-ant-aws)"; ROUTE="$REPLY"; state_set route "$ROUTE"; }
   [ -n "$MODEL" ]     || { ask "Provider model id"; MODEL="$REPLY"; state_set model "$MODEL"; }
   case "$ROUTER_ID" in *"|"http*) ;; *) die "the router must be written as <identity>|<url>";; esac
-  note "That router's owner must admit $NAME (and $OWNER) in its policy, or every turn is refused."
+  # A ROUTER ON THIS MACHINE (another instance's): this agent uses its port, and that router must admit it.
+  case "$ROUTER_ID" in *"|http://127.0.0.1:"[0-9]*)
+    P_ROUTER_USE="${ROUTER_ID##*:}"; P_ROUTER_USE="${P_ROUTER_USE%%/*}"; state_set router_shared yes ;; esac
+  if [ "$(state_get router_shared)" = yes ]; then
+    cat <<EOF
+
+  ${B}The router's owner admits this agent — once.${N} On this machine, as the user whose router it is:
+
+      ${B}heia router-serve add $NAME $OWNER${N}
+
+  (It is kept: that install's own re-runs and upgrades keep this agent's rules.)
+EOF
+    ask "Done? (y/N — the install carries on; every turn is refused until it is)" "N"
+  else
+    note "That router's owner must admit $NAME (and $OWNER) in its policy, or every turn is refused."
+  fi
 fi
 ok "engines will use route ${B}$ROUTE${N}, model ${B}$MODEL${N}"
+state_set route_used "$ROUTE"; state_set router_identity "${ROUTER_ID%%|*}"   # for this install's claim
 
 # ══ 4 · the agent ══════════════════════════════════════════════════════════════════════════════════
 step "4 · Agent"
 link_licence "$AGENT"
 if [ ! -f "$AGENT/$ABIN" ]; then
   spin "Downloading the agent and its runtime (a few hundred MB — a minute or two)"
-  activate install-agent --dir "$AGENT" > /tmp/heia-install-agent.log 2>&1 \
-    || die "install-agent failed — see /tmp/heia-install-agent.log"
+  activate install-agent --dir "$AGENT" > ${LOGD}/heia-install-agent.log 2>&1 \
+    || die "install-agent failed — see ${LOGD}/heia-install-agent.log"
   state_set agent "$(rel_top agent tag)"
   state_set engine-harness "$(rel_top engine-harness tag)"; state_set engine-mindmapchat "$(rel_top engine-mindmapchat tag)"
   ok "agent installed and verified against its published hash"
@@ -1548,15 +1823,15 @@ else
     ok "agent installed — current ($(state_get agent))"
   else
     T="$(rel_top agent tag)"
-    ( cd "$AGENT" && activate stop agent > /tmp/heia-agent-stop.log 2>&1 )
+    ( cd "$AGENT" && activate stop agent > ${LOGD}/heia-agent-stop.log 2>&1 )
     spin "Updating the agent to $T (a few hundred MB — a minute or two)"
     AF=""; [ "$OS" = "Darwin" ] && AF="--force"; [ "${FORCE_AGENT:-0}" = 1 ] && AF="--force"
-    if activate install-agent --dir "$AGENT" $AF > /tmp/heia-install-agent.log 2>&1; then
+    if activate install-agent --dir "$AGENT" $AF > ${LOGD}/heia-install-agent.log 2>&1; then
       state_set agent "$T"; updated "agent → $T"; ok "agent updated to $T (the previous binary is kept beside it)"
-    elif grep -q 'A DIFFERENT FILE' /tmp/heia-install-agent.log; then
+    elif grep -q 'A DIFFERENT FILE' ${LOGD}/heia-install-agent.log; then
       warn "the agent here is not a published release (a test build?) — left as it is. FORCE_AGENT=1 replaces it with $T."
     else
-      warn "the agent was not updated — see /tmp/heia-install-agent.log; the installed one stays"
+      warn "the agent was not updated — see ${LOGD}/heia-install-agent.log; the installed one stays"
     fi
   fi
   upgrade_engine engine-harness harness hexaeight-engine
@@ -1608,14 +1883,14 @@ fi
 ok "sandbox working"
 [ -f "$HOME/.claude/settings.json" ] && warn "~/.claude/settings.json exists — it can take the 'claude' engine off the router. Left untouched."
 
-( cd "$AGENT" && activate add-policy base-default --owner "$OWNER" --no-prompt --replace-open > /tmp/heia-policy.log 2>&1 ) \
-  || die "could not write the baseline policy — see /tmp/heia-policy.log"
+( cd "$AGENT" && activate add-policy base-default --owner "$OWNER" --no-prompt --replace-open > ${LOGD}/heia-policy.log 2>&1 ) \
+  || die "could not write the baseline policy — see ${LOGD}/heia-policy.log"
 ok "owner set and baseline policy written"
 
 spin "Sealing the engines against the router"
-activate engine --auto --dir "$AGENT" --route "$ROUTE" --model "$MODEL" --router "$ROUTER_ID" > /tmp/heia-engines.log 2>&1 \
-  || die "could not seal the engines — see /tmp/heia-engines.log"
-ok "$(grep -o '[0-9]* engine(s) sealed' /tmp/heia-engines.log | tail -1) against the router"
+activate engine --auto --dir "$AGENT" --route "$ROUTE" --model "$MODEL" --router "$ROUTER_ID" > ${LOGD}/heia-engines.log 2>&1 \
+  || die "could not seal the engines — see ${LOGD}/heia-engines.log"
+ok "$(grep -o '[0-9]* engine(s) sealed' ${LOGD}/heia-engines.log | tail -1) against the router"
 
 # MESSAGES FOR PEOPLE AT THIS AGENT ("incoming"): ON BY DEFAULT. Without it the agent exposes no
 # /api/incoming and a person who registered their email here (workspace → Messages → "Receive my messages
@@ -1654,7 +1929,7 @@ CFG="$AGENT/hexaeight-agent.json"
 # THE TERMINAL (Machines → Terminal) opens only from a page the agent allows. Without "origins" the agent
 # allows :5621 alone, but this installer's workspace is on :5620 — so the terminal was refused on every
 # default install. The workspace's local addresses are added here (kept alongside any already listed).
-WS_ORIGINS='["http://localhost:5620","http://127.0.0.1:5620"]'
+WS_ORIGINS="[\"http://localhost:$P_WS\",\"http://127.0.0.1:$P_WS\"]"
 fleet_on() { "$NODE" -e 'const d = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
                         const o = (d.fleet && d.fleet.origins) || [];
                         const ok = d.fleet && d.fleet.enabled === true && JSON.parse(process.argv[2]).every((x) => o.includes(x));
@@ -1677,28 +1952,41 @@ if [ "$(state_get fleet_local)" != "$MACHINE" ]; then
   for TRY in 1 2 3; do
     ( cd "$AGENT" && set -a && . ./env-file && set +a \
       && "./$ABIN" hexaeight-agent.json fleet-host add --name "$MACHINE" --host localhost --user "$(id -un)" --local \
-         < /dev/null > /tmp/heia-fleet.log 2>&1 ) && { state_set fleet_local "$MACHINE"; break; }
+         < /dev/null > ${LOGD}/heia-fleet.log 2>&1 ) && { state_set fleet_local "$MACHINE"; break; }
     sleep 10
   done
 fi
 if [ "$(state_get fleet_local)" = "$MACHINE" ]; then ok "Machines on — this computer is '$MACHINE' (workspace → Machines; you approve every command)"
-else warn "Machines could not add this computer — see /tmp/heia-fleet.log (the rest of the install is unaffected)"; fi
+else warn "Machines could not add this computer — see ${LOGD}/heia-fleet.log (the rest of the install is unaffected)"; fi
 fi
 
+apply_ports "$AGENT/hexaeight-agent.json"
 agent_start "Starting the agent" || die "the agent did not start — see $AGENT/agent.log"
-ok "agent running on :8770"
+ok "agent running on :${P_AGENT}"
 
 # ══ 5 · the workspace ══════════════════════════════════════════════════════════════════════════════
 if [ "$EXTERNAL_ONLY" = 1 ]; then
   step "5 · Workspace — not installed (an external agent is asked by other agents, not used in a browser)"
   NODE="$HOME/.heia/runtime/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node || true)"
 else
-step "5 · Workspace"
+# A WORKSPACE OF ITS OWN, OR NONE: one workspace can serve several agents (sign in with the agent's name). The
+# agent's memory / browser / code-memory services are installed either way — they hold THIS agent's stores.
+WS_OWN="$(state_get workspace_own)"
+if [ -z "$WS_OWN" ]; then
+  WS_OWN=yes
+  if [ "$INST" != 0 ]; then
+    note "One workspace can serve several agents: sign in there with this agent's name ($NAME)."
+    ask "A workspace of its own for this agent? (y/N)" "N"
+    case "$REPLY" in y|Y|yes|YES) WS_OWN=yes ;; *) WS_OWN=no ;; esac
+  fi
+  state_set workspace_own "$WS_OWN"
+fi
+step "5 · Workspace$([ "$WS_OWN" = no ] && echo ' — none of its own (its memory, browser and code-memory services only)')"
 WST="$(rel_top workspace tag)"
 if [ ! -f "$HOME/.heia/runtime/workspace/index.html" ]; then
   spin "Installing the workspace"
-  ( cd "$AGENT" && activate install-workspace > /tmp/heia-install-workspace.log 2>&1 ) \
-    || die "install-workspace failed — see /tmp/heia-install-workspace.log"
+  ( cd "$AGENT" && activate install-workspace > ${LOGD}/heia-install-workspace.log 2>&1 ) \
+    || die "install-workspace failed — see ${LOGD}/heia-install-workspace.log"
   [ -n "$WST" ] && state_set workspace "$WST"
 elif [ -n "$WST" ] && [ "$(state_get workspace)" != "$WST" ]; then
   # The workspace folder carries no version, so what this installer recorded is the only record — none
@@ -1706,35 +1994,47 @@ elif [ -n "$WST" ] && [ "$(state_get workspace)" != "$WST" ]; then
   # install-workspace --force backs up config.js and writes it again for this agent.
   spin "Updating the workspace to $WST"
   WA=""; [ "$SKIP_GATEWAY" = 1 ] || WA="--agent $NAME"
-  if ( cd "$AGENT" && activate install-workspace --force $WA > /tmp/heia-install-workspace.log 2>&1 ); then
+  if ( cd "$AGENT" && activate install-workspace --force $WA > ${LOGD}/heia-install-workspace.log 2>&1 ); then
     state_set workspace "$WST"; updated "workspace → $WST"; ok "workspace updated to $WST"
-    WSPID0="$(if [ "$OS" = "Darwin" ]; then lsof -tiTCP:5620 -sTCP:LISTEN 2>/dev/null | head -1
-              else ss -ltnp 2>/dev/null | grep ':5620 ' | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2; fi)"
+    WSPID0="$(if [ "$OS" = "Darwin" ]; then lsof -tiTCP:${P_WS} -sTCP:LISTEN 2>/dev/null | head -1
+              else ss -ltnp 2>/dev/null | grep ":$P_WS " | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2; fi)"
     [ -n "$WSPID0" ] && kill "$WSPID0" 2>/dev/null && sleep 1   # its server restarts below on the new files
   else
-    warn "the workspace was not updated — see /tmp/heia-install-workspace.log; the installed one stays"
+    warn "the workspace was not updated — see ${LOGD}/heia-install-workspace.log; the installed one stays"
   fi
 else
   spin "Checking the workspace"
-  ( cd "$AGENT" && activate install-workspace > /tmp/heia-install-workspace.log 2>&1 ) \
-    || die "install-workspace failed — see /tmp/heia-install-workspace.log"
+  ( cd "$AGENT" && activate install-workspace > ${LOGD}/heia-install-workspace.log 2>&1 ) \
+    || die "install-workspace failed — see ${LOGD}/heia-install-workspace.log"
 fi
 # The workspace is static files plus a small static server — `restart workspace` only says so and
 # starts nothing. Start that server here, detached, so it outlives this script; autostart (below)
 # brings it back at the next login.
 WS="$HOME/.heia/runtime/workspace"; NODE="$HOME/.heia/runtime/node/bin/node"
 [ -x "$NODE" ] || NODE="$(command -v node || true)"
-[ -f "$WS/serve.mjs" ] && [ -n "$NODE" ] || die "the workspace or its node runtime is missing — see /tmp/heia-install-workspace.log"
-if ! listening 5620; then
+[ -f "$WS/serve.mjs" ] && [ -n "$NODE" ] || die "the workspace or its node runtime is missing — see ${LOGD}/heia-install-workspace.log"
+# install-workspace renewed its own fields (side-service ports, editors): this instance's ports again, then the
+# editors sealed to THIS instance's services and the agent restarted on them — and checked.
+apply_ports "$AGENT/hexaeight-agent.json"
+if [ "$INST" != 0 ]; then
+  seal_editors
+  agent_start "Restarting the agent on this instance's services" || die "the agent did not come back — see $AGENT/agent.log"
+  verify_editors "$(cat "$AGENT/agent.log" 2>/dev/null)"
+fi
+if [ "$WS_OWN" = no ]; then
+  ok "no workspace of its own — sign in to $NAME from an existing workspace"
+else
+if ! listening ${P_WS}; then
   if command -v setsid >/dev/null; then
-    ( cd "$WS" && setsid "$NODE" serve.mjs --port 5620 --host 127.0.0.1 > "$HOME/.heia/workspace-5620.log" 2>&1 < /dev/null & )
+    ( cd "$WS" && setsid "$NODE" serve.mjs --port ${P_WS} --host 127.0.0.1 > "$HOME/.heia/workspace-${P_WS}.log" 2>&1 < /dev/null & )
   else
-    ( cd "$WS" && nohup "$NODE" serve.mjs --port 5620 --host 127.0.0.1 > "$HOME/.heia/workspace-5620.log" 2>&1 < /dev/null & )
+    ( cd "$WS" && nohup "$NODE" serve.mjs --port ${P_WS} --host 127.0.0.1 > "$HOME/.heia/workspace-${P_WS}.log" 2>&1 < /dev/null & )
   fi
 fi
 spin "Starting the workspace"
-wait_port 5620 30 || die "the workspace did not start — see ~/.heia/workspace-5620.log"
-ok "workspace on http://localhost:5620"
+wait_port ${P_WS} 30 || die "the workspace did not start — see ~/.heia/workspace-${P_WS}.log"
+ok "workspace on http://localhost:${P_WS}"
+fi   # WS_OWN
 fi   # EXTERNAL_ONLY
 
 
@@ -1788,7 +2088,7 @@ else
   # THE AGENT: publish itself — Cloudflare first, the fastagents.net relay if Cloudflare gives no address,
   # and its workspace (:5620) with it on the relay. Edited with the agent's own Node runtime (no python).
   CFG="$AGENT/hexaeight-agent.json"
-  WSP=5620; [ "$EXTERNAL_ONLY" = 1 ] && WSP=0          # an external agent carries no workspace on the relay
+  WSP=${P_WS}; { [ "$EXTERNAL_ONLY" = 1 ] || [ "${WS_OWN:-yes}" = no ]; } && WSP=0          # an external agent carries no workspace on the relay
   if ! grep -q '"mode": *"cloudflared"' "$CFG" || ! grep -q '"register": *true' "$CFG" || ! grep -q '"workspacePort"' "$CFG"; then
     cp -p "$CFG" "$CFG.bak_$(date +%Y%m%d_%H%M%S)"
     "$NODE" -e '
@@ -1818,11 +2118,15 @@ else
   case "$REG" in *OK*) ok "registered as $NAME — other agents find it by name";;
                  *) warn "registration not confirmed yet (it retries): ${REG:-no [register] line yet}";; esac
 
-  # THE WORKSPACE: find the agent by name, served over HTTPS. (An external agent has none.)
-  if [ "$EXTERNAL_ONLY" != 1 ]; then
+  # THE WORKSPACE: find the agent by name, served over HTTPS. (An external agent, or one without a workspace
+  # of its own, has none.)
+  if [ "$EXTERNAL_ONLY" != 1 ] && [ "${WS_OWN:-yes}" != no ]; then
   spin "Pointing the workspace at $NAME"
-  ( cd "$AGENT" && activate install-workspace --agent "$NAME" > /tmp/heia-install-workspace-agent.log 2>&1 ) \
-    || die "could not point the workspace at $NAME — see /tmp/heia-install-workspace-agent.log"
+  ( cd "$AGENT" && activate install-workspace --agent "$NAME" > ${LOGD}/heia-install-workspace-agent.log 2>&1 ) \
+    || die "could not point the workspace at $NAME — see ${LOGD}/heia-install-workspace-agent.log"
+  # install-workspace renews the side-service ports AND re-seals the editors to the DEFAULT ports - for instance
+  # N those are instance 0's services. This instance's ports and editors once more (checked again at the end).
+  apply_ports "$AGENT/hexaeight-agent.json"; seal_editors
   WSLOG="$HOME/.heia/workspace-tunnel.log"
   if [ -n "$AGENT_WS" ]; then
     # On the relay the agent already carries its workspace: no second tunnel, nothing more asked of Cloudflare.
@@ -1830,12 +2134,12 @@ else
   else
   # ONE workspace tunnel. A running one is reused (its address is in its log); matched on the --url
   # argument itself, since the command line carries other flags in between.
-  if ! ps -eo args 2>/dev/null | grep -v grep | grep -q -- "--url http://127.0.0.1:5620"; then
+  if ! ps -eo args 2>/dev/null | grep -v grep | grep -q -- "--url http://127.0.0.1:${P_WS}"; then
     : > "$WSLOG"
     if command -v setsid >/dev/null; then
-      ( setsid "$CF" tunnel --no-autoupdate --url http://127.0.0.1:5620 > "$WSLOG" 2>&1 < /dev/null & )
+      ( setsid "$CF" tunnel --no-autoupdate --url http://127.0.0.1:${P_WS} > "$WSLOG" 2>&1 < /dev/null & )
     else
-      ( nohup "$CF" tunnel --no-autoupdate --url http://127.0.0.1:5620 > "$WSLOG" 2>&1 < /dev/null & )
+      ( nohup "$CF" tunnel --no-autoupdate --url http://127.0.0.1:${P_WS} > "$WSLOG" 2>&1 < /dev/null & )
     fi
   fi
   spin "Opening the workspace's public address"
@@ -1867,12 +2171,12 @@ step "7 · Start at login"
 port_pid() { if [ "$OS" = "Darwin" ]; then lsof -tiTCP:"$1" -sTCP:LISTEN 2>/dev/null | head -1
              else ss -ltnp 2>/dev/null | grep ":$1 " | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2; fi; }
 start_ourselves() {   # the fallback: our own detached copies, as during the install
-  if [ "$MODE" = own ] && ! listening 5100; then ( cd "$ROUTER" && activate_bg restart router > /tmp/heia-router-start.log 2>&1 ); wait_port 5100 60; fi
-  listening 8770 || agent_start "Starting the agent"
-  if [ "$EXTERNAL_ONLY" != 1 ] && ! listening 5620; then
-    if command -v setsid > /dev/null; then ( cd "$WS" && setsid "$NODE" serve.mjs --port 5620 --host 127.0.0.1 > "$HOME/.heia/workspace-5620.log" 2>&1 < /dev/null & )
-    else ( cd "$WS" && nohup "$NODE" serve.mjs --port 5620 --host 127.0.0.1 > "$HOME/.heia/workspace-5620.log" 2>&1 < /dev/null & ); fi
-    wait_port 5620 30
+  if [ "$MODE" = own ] && ! listening ${P_ROUTER}; then ( cd "$ROUTER" && activate_bg restart router > ${LOGD}/heia-router-start.log 2>&1 ); wait_port ${P_ROUTER} 60; fi
+  listening ${P_AGENT} || agent_start "Starting the agent"
+  if [ "$EXTERNAL_ONLY" != 1 ] && [ "${WS_OWN:-yes}" != no ] && ! listening ${P_WS}; then
+    if command -v setsid > /dev/null; then ( cd "$WS" && setsid "$NODE" serve.mjs --port ${P_WS} --host 127.0.0.1 > "$HOME/.heia/workspace-${P_WS}.log" 2>&1 < /dev/null & )
+    else ( cd "$WS" && nohup "$NODE" serve.mjs --port ${P_WS} --host 127.0.0.1 > "$HOME/.heia/workspace-${P_WS}.log" 2>&1 < /dev/null & ); fi
+    wait_port ${P_WS} 30
   fi
 }
 MANAGER=""
@@ -1891,23 +2195,29 @@ if [ -z "$MANAGER" ]; then
   warn "no service manager to hand to — the services keep running, but will not start at login"
 else
   spin "Handing router, agent and workspace to $MANAGER"
-  ( cd "$AGENT" && activate stop agent > /tmp/heia-agent-stop.log 2>&1 )
-  [ "$MODE" = own ] && ( cd "$ROUTER" && activate stop router > /tmp/heia-router-stop.log 2>&1 )
-  WSPID="$(port_pid 5620)"; [ -n "$WSPID" ] && kill "$WSPID" 2>/dev/null
-  for i in $(seq 1 30); do listening 8770 || listening 5620 || { [ "$MODE" = own ] && listening 5100; } || break; sleep 1; done
+  ( cd "$AGENT" && activate stop agent > ${LOGD}/heia-agent-stop.log 2>&1 )
+  [ "$MODE" = own ] && ( cd "$ROUTER" && activate stop router > ${LOGD}/heia-router-stop.log 2>&1 )
+  WSPID="$(port_pid ${P_WS})"; [ -n "$WSPID" ] && kill "$WSPID" 2>/dev/null
+  for i in $(seq 1 30); do listening ${P_AGENT} || listening ${P_WS} || { [ "$MODE" = own ] && listening ${P_ROUTER}; } || break; sleep 1; done
   # ROUTER FIRST, AND READY. systemd's After=/Requires= only order the START: the agent is launched the
   # moment the router's process is, while the router is still checking its licence — and the agent
   # validates its routes once, at start. This drop-in holds every agent start (this hand-over, a restart,
   # a reboot) until the router answers on :5100 (up to 90 s), then 3 s more to settle — as the install itself does. (launchd needs none: Activate's agent job
   # already waits for :5100.) Written before the units are loaded, so the first start honours it too.
-  if [ "$MANAGER" = systemd ] && [ "$MODE" = own ]; then
+  # THE ROUTER THIS AGENT USES — its own, or (a shared one) another instance's on this machine: wait for THAT port.
+  if [ "$MANAGER" = systemd ] && { [ "$MODE" = own ] || [ "$(state_get router_shared)" = yes ]; }; then
     mkdir -p "$UNITS_L/hexaeight-agent.service.d"
-    cat > "$UNITS_L/hexaeight-agent.service.d/wait-for-router.conf" <<'UNIT_EOF'
-# Written by the HexaEight installer: start the agent only once the router answers on :5100.
-[Service]
-ExecStartPre=/bin/bash -c 'for i in $(seq 1 90); do (exec 3<>/dev/tcp/127.0.0.1/5100) 2>/dev/null && { sleep 3; exit 0; }; sleep 1; done; echo "router not answering on :5100 after 90 s — starting the agent anyway"; exit 0'
-TimeoutStartSec=180
-UNIT_EOF
+    { echo "# Written by the HexaEight installer: start the agent only once its router answers on :$P_ROUTER_USE."
+      echo "[Service]"
+      echo "ExecStartPre=/bin/bash -c 'for i in \$(seq 1 90); do (exec 3<>/dev/tcp/127.0.0.1/$P_ROUTER_USE) 2>/dev/null && { sleep 3; exit 0; }; sleep 1; done; echo \"router not answering on :$P_ROUTER_USE after 90 s — starting the agent anyway\"; exit 0'"
+      echo "TimeoutStartSec=180"
+    } > "$UNITS_L/hexaeight-agent.service.d/wait-for-router.conf"
+  fi
+  # A ROUTER OF ITS OWN ON ANOTHER PORT: systemd starts it with LLM_ROUTER_PORT (the router reads its port from it).
+  if [ "$MANAGER" = systemd ] && [ "$MODE" = own ] && [ "$P_ROUTER" != ${P_ROUTER} ]; then
+    mkdir -p "$UNITS_L/hexaeight-router.service.d"
+    printf '%s\n' "# Written by the HexaEight installer: this instance's router port." "[Service]" "Environment=LLM_ROUTER_PORT=$P_ROUTER" \
+      > "$UNITS_L/hexaeight-router.service.d/port.conf"
   fi
   # THE ASK TIMEOUT (see HEIA_ASK_TIMEOUT_SECONDS near the top): a unit does not inherit this shell, so
   # systemd gets the value in its own drop-in — written on every run, so a re-run keeps it current.
@@ -1917,14 +2227,17 @@ UNIT_EOF
                   "[Service]" "Environment=HEIA_ASK_TIMEOUT_SECONDS=$HEIA_ASK_TIMEOUT_SECONDS" \
       > "$UNITS_L/hexaeight-agent.service.d/ask-timeout.conf"
   fi
-  if [ "$MODE" = own ]; then ( cd "$AGENT" && activate autostart on --agent "$AGENT" --router "$ROUTER" > /tmp/heia-autostart.log 2>&1 )
-  else                     ( cd "$AGENT" && activate autostart on --agent "$AGENT" > /tmp/heia-autostart.log 2>&1 ); fi
+  NOWS=""; [ "${WS_OWN:-yes}" = no ] && NOWS="--no-workspace"
+  # a router elsewhere (or another instance's): no router unit here — a second instance must never pick up ~/hbia-router
+  NOR=""; [ "$INST" != 0 ] && NOR="--no-router"
+  if [ "$MODE" = own ]; then ( cd "$AGENT" && activate autostart on --agent "$AGENT" --router "$ROUTER" --workspace-port "$P_WS" $NOWS > ${LOGD}/heia-autostart.log 2>&1 )
+  else                     ( cd "$AGENT" && activate autostart on --agent "$AGENT" $NOR --workspace-port "$P_WS" $NOWS > ${LOGD}/heia-autostart.log 2>&1 ); fi
   UP=1
-  { [ "$MODE" != own ] || wait_port 5100 90; } && wait_port 8770 150 && { [ "$EXTERNAL_ONLY" = 1 ] || wait_port 5620 90; } || UP=0
+  { [ "$MODE" != own ] || wait_port ${P_ROUTER} 90; } && wait_port ${P_AGENT} 150 && { [ "$EXTERNAL_ONLY" = 1 ] || [ "${WS_OWN:-yes}" = no ] || wait_port ${P_WS} 90; } || UP=0
   if [ "$UP" = 1 ]; then
     ok "$MANAGER runs them now — they start at login and come back if they stop"
   else
-    warn "$MANAGER did not bring everything up (see /tmp/heia-autostart.log) — starting them directly instead"
+    warn "$MANAGER did not bring everything up (see ${LOGD}/heia-autostart.log) — starting them directly instead"
     start_ourselves
   fi
   # ONE MORE, CALM RESTART OF THE AGENT. After an install, the agent that came up at the end has more
@@ -1939,7 +2252,12 @@ UNIT_EOF
     launchd) launchctl kickstart -k "gui/$(id -u)/com.hexaeight.agent" > /dev/null 2>&1 ;;
   esac
   sleep 3
-  if wait_port 8770 180 && { [ "$EXTERNAL_ONLY" = 1 ] || listening 5620 || wait_port 5620 60; }; then ok "agent restarted cleanly"
+  if wait_port ${P_AGENT} 180 && { [ "$EXTERNAL_ONLY" = 1 ] || [ "${WS_OWN:-yes}" = no ] || listening ${P_WS} || wait_port ${P_WS} 60; }; then ok "agent restarted cleanly"
+    # the agent that systemd / launchd runs now: its editors once more, from its own startup lines
+    if [ "$INST" != 0 ]; then
+      case "$MANAGER" in systemd) verify_editors "$(journalctl --user -u hexaeight-agent.service -n 400 --no-pager -o cat 2>/dev/null)" ;;
+                         launchd) verify_editors "$(tail -n 400 "$HOME/.heia/logs/agent.log" 2>/dev/null)" ;; esac
+    fi
   else warn "the agent did not answer after the final restart — run: heia restart"; fi
   # The agent started again, so it published itself again: take its address from the registry.
   if [ -n "$AGENT_URL" ]; then
@@ -1976,7 +2294,7 @@ spin_done
 if [ -n "$UPDATES" ]; then printf '\n  %sUpdated this run%s (only what had a newer release):\n%s' "$B" "$N" "$UPDATES"
 elif [ "$RERUN" = 1 ] && [ -n "$REL" ]; then printf '\n  Everything was already on its current release — nothing downloaded.\n'
 elif [ "$RERUN" = 1 ]; then printf '\n  %s!%s The release list could not be read, so nothing was checked for updates.\n' "$Y" "$N"; fi
-OPEN="${WS_URL:-http://localhost:5620}"
+OPEN="${WS_URL:-http://localhost:${P_WS}}"
 cat <<EOF
 
   ${G}${B}Done.${N}  Open ${B}$OPEN${N} and sign in as ${B}$OWNER${N} with your Authenticator.
