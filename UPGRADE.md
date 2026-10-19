@@ -14,6 +14,19 @@ release**, then tells you what it updated. The manual steps below remain for ins
 
 ---
 
+## What this release adds (agent r50)
+
+- **An API route can be limited to named callers.** An inbound policy rule whose object is `api:<route>` (a glob works:
+  `api:reports-*`) decides who may call that sealed API route. A route named by such a rule is protected: only a caller
+  with a matching `allow` reaches it, and a matching `deny` always wins. Routes that no `api:` rule names are unchanged —
+  the agent's door rules alone decide them, as before.
+- **Refusals are recorded.** A call to a protected route without a matching rule is answered "no such route" and
+  recorded in the audit trail as refused, with the caller and the route.
+- Example: `hexaeight-activate add-policy --principal reports.example.net --object 'api:reports-*'`.
+- Unchanged: workspace r42, router r12, harness engine r49, mindmapchat engine r21, local vision models r43.
+
+Upgrade: re-run the one-command installer (it updates only the agent).
+
 ## What this release adds (harness engine r49)
 
 - **Scanned PDFs with no text layer can be added to a memory.** When a memory is ingested with garbled-page skipping or
