@@ -14,6 +14,23 @@ release**, then tells you what it updated. The manual steps below remain for ins
 
 ---
 
+## What this release adds (harness engine and agent r51)
+
+- **Mission requirements are ticked off, not judged.** A mission's `compliance` card lists what every answer must do.
+  Each card of an answer names the requirements it meets; between the parts of a long answer the harness reminds the
+  model of the ones still open, and an answer that never meets one is sent back with exactly what is missing. A
+  requirement tagged `[code]` is checked by the harness itself. No extra model call is made for compliance.
+- **Gate cards are checked when they are written.** `mission_cards op='template'` returns the exact shape of the
+  `compliance` and `source-of-truth` cards and how the harness reads them; `op='set'` refuses a gate card the harness
+  could not read, says why, and returns the template.
+- **A turn's command line is hidden from `ps`.** Once the engine inside a turn's sandbox is running, the sandbox's
+  command line is reduced to its program name instead of showing the message and its prompt for the whole turn.
+- Mission authoring learns about these cards from hexaeight-activate 1.0.81.
+- Unchanged: workspace r42, router r12, mindmapchat engine r21, local vision models r43.
+
+Upgrade: `dotnet tool update -g HexaEight.Activate`, then re-run the one-command installer (it updates the agent and
+the harness engine).
+
 ## What this release adds (agent r50)
 
 - **An API route can be limited to named callers.** An inbound policy rule whose object is `api:<route>` (a glob works:
